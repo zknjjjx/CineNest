@@ -1,4 +1,5 @@
 "use strict";
+const REMOTE = location.protocol === "https:"; // 经隧道访问时链路更长，放宽超时，避免过早换源
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const app = $("#app");
@@ -274,7 +275,7 @@ const Modes = {
 
 /* ---------- 播放器：自动选最快源 + 故障自动换源 ---------- */
 class Player {
-  constructor(tok, meta, key) { Object.assign(this, { tok, meta, key, sources: [], si: 0, ei: 0, proxy: false, bad: new Set(), hls: null, started: false, resolved: false }); }
+  constructor(tok, meta, key) { Object.assign(this, { tok, meta, key, sources: [], si: 0, ei: 0, proxy: false, bad: new Set(), dbad: new Set(), hls: null, started: false, resolved: false }); }
   alive() { return this.tok === routeToken; }
   async resolve() {
     const q = `/api/resolve?name=${enc(this.meta.title)}&year=${enc(this.meta.year || "")}`;
@@ -368,19 +369,20 @@ class Player {
     $("#psrc").textContent = `· ${src.site}${this.proxy ? "（代理）" : ""}`;
     $("#pprev").style.display = $("#pnext").style.display = eps.length > 1 ? "" : "none";
     this.mask(`正在连接 ${src.site}…`); this.renderEps();
-    const url = /\.m3u8/i.test(ep.url) ? `/m3u8?url=${enc(ep.url)}${this.proxy ? "&proxy=1" : ""}${localStorage.noad === "0" ? "&noad=0" : ""}` : ep.url;
+    const mixed = location.protocol === "https:" && /^http:\/\//i.test(ep.url);
+    const url = /\.m3u8/i.test(ep.url) ? `/m3u8?url=${enc(ep.url)}${this.proxy ? "&proxy=1" : ""}${localStorage.noad === "0" ? "&noad=0" : ""}` : ((this.proxy || mixed) ? `/seg?url=${enc(ep.url)}` : ep.url);
     let ok = false;
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };
-    this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, 15000);
+    this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, REMOTE ? 25000 : 15000);
     const onPlaying = () => { ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
     v.onplaying = onPlaying;
-    v.onwaiting = () => { if (!ok) return; this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), 20000); };
+    v.onwaiting = () => { if (!ok) return; this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), REMOTE ? 30000 : 20000); };
     v.ontimeupdate = () => { if (ok) { clearTimeout(this.stall); this.save(v); } };
     v.onended = () => { if (this.ei + 1 < this.eps().length) this.play(this.ei + 1, 0); };
     const begin = () => {
       if (at > 3) { try { v.currentTime = at; } catch (e) { } }
       const p = v.play();
-      if (p && p.catch) p.catch(err => { if (err && err.name === "NotAllowedError") { clearTimeout(this.watch); this.mask(""); toast("点一下画面开始播放"); v.addEventListener("play", () => { if (!ok) this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, 15000); }, { once: true }); } });
+      if (p && p.catch) p.catch(err => { if (err && err.name === "NotAllowedError") { clearTimeout(this.watch); this.mask(""); toast("点一下画面开始播放"); v.addEventListener("play", () => { if (!ok) this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, REMOTE ? 25000 : 15000); }, { once: true }); } });
     };
     const isM3u8 = /\.m3u8/i.test(ep.url);
     const nativeHls = !!v.canPlayType("application/vnd.apple.mpegurl") && (IS_IOS || IS_SAFARI || !(window.Hls && Hls.isSupported()));
@@ -400,16 +402,26 @@ class Player {
   }
   failover(why, at) {
     if (!this.alive()) return;
+    // 策略：先把所有线路都直连试一遍（视频不经过 NAS），全部直连失败后才走 NAS 代理保底
     const cur = this.sources[this.si];
-    if (!this.proxy) { this.proxy = true; this.mask("直连不畅，改走代理…"); this.play(this.ei, at, true); return; }
-    this.bad.add(this.si);
-    const next = this.sources.findIndex((s, k) => !this.bad.has(k) && s.groups[0].eps.length > this.ei);
-    if (next < 0) { this.cleanup(); this.mask("所有线路都无法播放，稍后再试"); this.status(); toast("所有线路都无法播放"); return; }
-    // 新源里按集名对齐
-    const name = this.eps()[this.ei]?.name; this.si = next;
-    const k = this.eps().findIndex(e => e.name === name); if (k >= 0) this.ei = k;
-    toast(`${cur.site} ${why}，已自动切到 ${this.sources[next].site}`);
-    this.status(); this.play(this.ei, at);
+    const has = k => this.sources[k].groups[0].eps.length > this.ei;
+    const go = (next, proxy) => {
+      const name = this.eps()[this.ei]?.name; this.si = next;
+      const k = this.eps().findIndex(e => e.name === name); if (k >= 0) this.ei = k;
+      this.proxy = proxy; this.status(); this.play(this.ei, at, true);
+    };
+    if (!this.proxy) {
+      this.dbad.add(this.si);
+      const nd = this.sources.findIndex((s, k) => !this.bad.has(k) && !this.dbad.has(k) && has(k));
+      if (nd >= 0) { toast(`${cur.site} ${why}，已直连切到 ${this.sources[nd].site}`); go(nd, false); return; }
+      const np = this.sources.findIndex((s, k) => !this.bad.has(k) && has(k));
+      if (np >= 0) { this.mask("直连线路都不通，改走代理…"); toast(`直连都不通，改由 NAS 代理 ${this.sources[np].site}`); go(np, true); return; }
+    } else {
+      this.bad.add(this.si);
+      const np = this.sources.findIndex((s, k) => !this.bad.has(k) && has(k));
+      if (np >= 0) { toast(`${cur.site}（代理）${why}，已切到 ${this.sources[np].site}（代理）`); go(np, true); return; }
+    }
+    this.cleanup(); this.mask("所有线路都无法播放，稍后再试"); this.status(); toast("所有线路都无法播放");
   }
   cleanup() { clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
   save(v, force) {
@@ -425,7 +437,7 @@ class Player {
     const close = () => { bg.classList.remove("on"); sh.classList.remove("on"); };
     sh.innerHTML = `<div class="grab"></div><h4>选择线路</h4>${this.sources.map((s, i) => `<div class="srow${i === this.si ? " on" : ""}${this.bad.has(i) ? " bad" : ""}" data-i="${i}"><span>${esc(s.site)}</span><small>${s.groups[0].eps.length > 1 ? s.groups[0].eps.length + " 集" : ""} ${esc(s.remarks || "")}</small><span class="sp"></span><small>${s.ms}ms</small></div>`).join("")}
       <label class="switch"><span>自动去除插播广告</span><input type="checkbox" id="noad" ${localStorage.noad === "0" ? "" : "checked"}></label>`;
-    $$(".srow", sh).forEach(r => r.onclick = () => { const i = +r.dataset.i; this.bad.delete(i); const at = $("#pv").currentTime; this.si = i; close(); this.play(Math.min(this.ei, this.eps().length - 1), at); });
+    $$(".srow", sh).forEach(r => r.onclick = () => { const i = +r.dataset.i; this.bad.delete(i); this.dbad.delete(i); const at = $("#pv").currentTime; this.si = i; close(); this.play(Math.min(this.ei, this.eps().length - 1), at); });
     $("#noad", sh).onchange = e => { localStorage.noad = e.target.checked ? "1" : "0"; close(); this.play(this.ei, $("#pv").currentTime); };
     bg.onclick = close;
     requestAnimationFrame(() => { bg.classList.add("on"); sh.classList.add("on"); });

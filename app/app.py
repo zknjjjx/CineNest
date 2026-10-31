@@ -263,9 +263,19 @@ def filter_ads(lines):
     return out, removed
 
 
+def is_https(req):
+    """页面经 HTTPS（如 Cloudflare 隧道）访问时为 True：此时 http:// 资源会被浏览器当作混合内容拦截。"""
+    if req.secure:
+        return True
+    if req.headers.get("X-Forwarded-Proto", "").lower().startswith("https"):
+        return True
+    return '"https"' in req.headers.get("Cf-Visitor", "")
+
+
 async def m3u8(req):
     url = req.query.get("url", "")
     full = req.query.get("proxy") == "1"
+    secure = is_https(req)
     noad = req.query.get("noad", "1") == "1"
     if not url.startswith("http"):
         return web.Response(status=400, text="bad url")
@@ -284,14 +294,14 @@ async def m3u8(req):
     for i, ln in enumerate(lines):
         if ln.startswith("#"):
             if 'URI="' in ln:
-                ln = re.sub(r'URI="([^"]+)"', lambda m: f'URI="{wrap(urljoin(base, m.group(1)), full, True)}"', ln)
+                ln = re.sub(r'URI="([^"]+)"', lambda m: f'URI="{wrap(urljoin(base, m.group(1)), full, True, secure)}"', ln)
             out.append(ln)
         else:
             absu = urljoin(base, ln)
             if is_master or absu.split("?")[0].endswith(".m3u8"):
                 out.append(f"/m3u8?url={quote(absu, safe='')}" + ("&proxy=1" if full else "") + ("" if noad else "&noad=0"))
             else:
-                out.append(wrap(absu, full, False))
+                out.append(wrap(absu, full, False, secure))
     removed = 0
     if not is_master and noad:
         out, removed = filter_ads(out)
@@ -299,8 +309,10 @@ async def m3u8(req):
                         headers={"X-Ads-Removed": str(int(removed)), "Cache-Control": "no-cache"})
 
 
-def wrap(u, full, is_key):
-    return f"/seg?url={quote(u, safe='')}" if (full or is_key) else u
+def wrap(u, full, is_key, secure=False):
+    # HTTPS 页面里 http:// 切片会被拦截，只能经本机中转；https:// 切片仍然直连，不占家里上行带宽
+    mixed = secure and u.startswith("http://")
+    return f"/seg?url={quote(u, safe='')}" if (full or is_key or mixed) else u
 
 
 async def seg(req):
