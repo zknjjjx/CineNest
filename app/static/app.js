@@ -212,7 +212,12 @@ const Modes = {
       if (this.fsEl()) await this.exitFs();
       this.mark(v);
       if (v.requestPictureInPicture) await v.requestPictureInPicture(); else v.webkitSetPresentationMode("picture-in-picture");
-    } catch (e) { toast("当前浏览器不支持悬浮播放"); }
+    } catch (e) {
+      const standalone = navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+      if (standalone && (IS_IOS || IS_SAFARI)) toast("从主屏幕图标打开时，iOS 不允许悬浮播放。想用悬浮，请在 Safari 里打开本站", 5000);
+      else if (!v.currentSrc) toast("视频开始播放后才能悬浮");
+      else toast("当前浏览器不支持悬浮播放");
+    }
   },
   async exitFs() { try { if (document.exitFullscreen) await document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) { } },
   // iPhone Safari 不支持网页全屏和锁定横屏：用"旋转铺满"模拟横屏全屏，不依赖系统自动转屏
