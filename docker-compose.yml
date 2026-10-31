@@ -1,0 +1,15 @@
+services:
+  cmstv:
+    build: ./app
+    image: cmstv:latest
+    container_name: cmstv
+    restart: unless-stopped
+    init: true
+    environment:
+      - TZ=Asia/Shanghai
+      - RUN_AT=04:00        # 每天自动检测时间
+      - ALLOW_ADULT=0       # 1=保留成人站点
+    ports:
+      - "8899:8080"
+    volumes:
+      - ./data:/data

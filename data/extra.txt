@@ -1,0 +1,2 @@
+# 手动添加接口，每行一个：名称,接口地址
+# 例：量子资源,https://cj.lziapi.com/api.php/provide/vod
