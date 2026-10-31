@@ -22,7 +22,8 @@ sh install.sh 9000     # 自定义端口
 ## 配置
 - 自定义接口：编辑 `data/extra.txt`，每行一个 `名称,接口地址`
 - `docker-compose.yml` 环境变量：`RUN_AT`（每日检测时间）、`ALLOW_ADULT`（1=保留成人站点，默认 0）
-- 升级：覆盖除 `data/` 外的文件后再次执行 `sh install.sh`
+- 升级：在安装目录执行 `docker compose pull && docker compose up -d`（或再次执行 `sh install.sh`）
+- 镜像：`zknjjjx/cinenest`（Docker Hub，amd64 / arm64 / armv7），推送到 main 后由 GitHub Actions 自动构建
 
 ## 声明
 仅供学习与个人使用。请只播放你拥有或获得授权的内容，并遵守当地版权法律。

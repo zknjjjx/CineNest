@@ -13,7 +13,9 @@ mkdir -p data && [ -f data/extra.txt ] || echo "# 每行一个 Apple CMS 接口�
 sed -i "s/\"[0-9]*:8080\"/\"${PORT}:8080\"/" docker-compose.yml
 # 清理旧版双容器
 docker rm -f cms-web cms-collector >/dev/null 2>&1 || true
-$DC up -d --build
+$DC pull
+$DC up -d
+docker image prune -f >/dev/null 2>&1 || true
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo "安装完成：http://${IP:-本机IP}:${PORT}"
 echo "首次启动会在后台检测影视源（约 5 分钟），期间页面可正常打开。"

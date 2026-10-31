@@ -1,7 +1,7 @@
 services:
   cmstv:
-    build: ./app
-    image: cmstv:latest
+    image: zknjjjx/cinenest:latest   # Docker Hub 预构建镜像（amd64 / arm64 / armv7）
+    # build: ./app                   # 想本地构建时取消注释，并注释掉上一行
     container_name: cmstv
     restart: unless-stopped
     init: true
