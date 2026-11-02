@@ -278,6 +278,13 @@ const Modes = {
   },
 };
 
+/* 记住哪些片源直连不通、需要服务器中转（7 天） */
+const Relay = {
+  m() { try { return JSON.parse(localStorage.relay || "{}"); } catch (e) { return {}; } },
+  get(api) { const t = this.m()[api]; return t && Date.now() - t < 7 * 864e5; },
+  set(api, on) { const m = this.m(); if (on) m[api] = Date.now(); else delete m[api]; localStorage.relay = JSON.stringify(m); }
+};
+
 /* ---------- 播放器：自动选最快源 + 故障自动换源 ---------- */
 class Player {
   constructor(tok, meta, key) { Object.assign(this, { tok, meta, key, sources: [], si: 0, ei: 0, proxy: false, bad: new Set(), dbad: new Set(), hls: null, started: false, resolved: false }); }
@@ -362,16 +369,16 @@ class Player {
   play(ei, at, keepMode) {
     const v = this.ensurePlayer();
     this.started = true; this.ei = ei;
-    if (!keepMode) this.proxy = false;
     let eps = this.eps();
     if (ei >= eps.length) { // 当前源没有这一集，找一个有的
       const j = this.sources.findIndex((s, k) => !this.bad.has(k) && s.groups[0].eps.length > ei);
       if (j < 0) { toast("还没有这一集"); return; } this.si = j; eps = this.eps();
     }
     const ep = eps[ei], src = this.sources[this.si];
+    if (!keepMode) this.proxy = REMOTE && !!Relay.get(src.api); // 记住了“直连不通”的站点，直接走中转
     this.cleanup();
     $("#pnow").textContent = eps.length > 1 ? ep.name : "正片";
-    $("#psrc").textContent = `· ${src.site}${this.proxy ? "（代理）" : ""}`;
+    $("#psrc").textContent = `· ${src.site}${this.proxy ? "（中转）" : ""}`;
     $("#pprev").style.display = $("#pnext").style.display = eps.length > 1 ? "" : "none";
     this.mask(`正在连接 ${src.site}…`); this.renderEps();
     const mixed = !REMOTE || /^http:\/\//i.test(ep.url); // 局域网访问时一律经 N1 中转（家里设备走代理会被片源 CDN 拒绝）；https 页面里的 http 资源也必须中转
@@ -415,17 +422,17 @@ class Player {
       const k = this.eps().findIndex(e => e.name === name); if (k >= 0) this.ei = k;
       this.proxy = proxy; this.status(); this.play(this.ei, at, true);
     };
-    if (!this.proxy) {
-      this.dbad.add(this.si);
-      const nd = this.sources.findIndex((s, k) => !this.bad.has(k) && !this.dbad.has(k) && has(k));
-      if (nd >= 0) { toast(`${cur.site} ${why}，已直连切到 ${this.sources[nd].site}`); go(nd, false); return; }
-      const np = this.sources.findIndex((s, k) => !this.bad.has(k) && has(k));
-      if (np >= 0) { this.mask("直连线路都不通，改走代理…"); toast(`直连都不通，改由 NAS 代理 ${this.sources[np].site}`); go(np, true); return; }
-    } else {
-      this.bad.add(this.si);
-      const np = this.sources.findIndex((s, k) => !this.bad.has(k) && has(k));
-      if (np >= 0) { toast(`${cur.site}（代理）${why}，已切到 ${this.sources[np].site}（代理）`); go(np, true); return; }
+    // 策略：先直连（切片不经过家里上行）；直连失败先让服务器中转同一线路再试（不少片源 CDN 只认国内家宽 IP，
+    // 设备挂了代理/在海外时直连会 403），中转也不行才换下一条线路
+    if (REMOTE && !this.proxy) {
+      this.dbad.add(this.si); Relay.set(cur.api, 1);
+      this.mask(`${cur.site} 直连不通，改由服务器中转…`); toast(`${cur.site} 直连${why}，改由服务器中转`);
+      go(this.si, true); return;
     }
+    if (this.proxy) Relay.set(cur.api, 0);
+    this.bad.add(this.si);
+    const nx = this.sources.findIndex((s, k) => !this.bad.has(k) && has(k));
+    if (nx >= 0) { const r = REMOTE && !!Relay.get(this.sources[nx].api); toast(`${cur.site} ${why}，已切到 ${this.sources[nx].site}`); go(nx, r); return; }
     this.cleanup(); this.mask("所有线路都无法播放，稍后再试"); this.status(); toast("所有线路都无法播放");
   }
   cleanup() { clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
