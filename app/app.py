@@ -622,6 +622,91 @@ def client_geo(req):
     return (req.headers.get("CF-IPCountry") or "").upper()
 
 
+# ---------- 学习：开代理（出口不在国内）的访客直连各片源是否成功 ----------
+# 前端在“出口不在 CN”时上报每次直连的成败；按片源接口累计，14 天半衰期衰减。
+# 判定：失败明显多于成功 → 需中转（排后、一开始就中转）；成功明显多于失败 → 可直连（排前）。
+LEARN_FILE = os.path.join(DATA, "geolearn.json")
+LEARN_HALF = 14 * 86400
+_learn = {"d": None, "dirty": False, "saved": 0}
+
+
+def _learn_db():
+    if _learn["d"] is None:
+        try:
+            _learn["d"] = json.load(open(LEARN_FILE, encoding="utf-8"))
+        except Exception:
+            _learn["d"] = {}
+    return _learn["d"]
+
+
+def _decayed(e, now):
+    k = 0.5 ** ((now - e.get("t", now)) / LEARN_HALF)
+    return e.get("ok", 0) * k, e.get("fail", 0) * k
+
+
+def learn_verdict(api):
+    e = _learn_db().get(api)
+    if not e:
+        return None
+    ok, fail = _decayed(e, time.time())
+    if fail >= 1.8 and fail > ok * 2:
+        return 1   # 代理出口直连不通，需要中转
+    if ok >= 1.8 and ok > fail * 2:
+        return 0   # 代理出口也能直连
+    return None
+
+
+def _learn_save(force=False):
+    if not _learn["dirty"] or (not force and time.time() - _learn["saved"] < 60):
+        return
+    try:
+        tmp = LEARN_FILE + ".tmp"
+        json.dump(_learn["d"], open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
+        os.replace(tmp, LEARN_FILE)
+        _learn["dirty"], _learn["saved"] = False, time.time()
+    except Exception:
+        pass
+
+
+async def api_learn(req):
+    geo = client_geo(req)
+    if not geo or geo in ("CN", "XX"):   # 只学开代理/海外出口；局域网和国内出口不计
+        return web.json_response({"ok": False})
+    try:
+        b = await req.json()
+    except Exception:
+        return web.json_response({"ok": False}, status=400)
+    api, good = str(b.get("api", "")), bool(b.get("ok"))
+    if not site_by_api(api):             # 只接受已知片源，防止乱写
+        return web.json_response({"ok": False}, status=400)
+    now = time.time()
+    db = _learn_db()
+    e = db.get(api) or {}
+    ok, fail = _decayed(e, now) if e else (0.0, 0.0)
+    if good: ok += 1
+    else: fail += 1
+    db[api] = {"ok": round(min(ok, 50), 3), "fail": round(min(fail, 50), 3), "t": now}
+    _learn["dirty"] = True
+    _learn_save()
+    return web.json_response({"ok": True, "lock": learn_verdict(api)})
+
+
+async def api_learned(req):
+    now = time.time()
+    names = {s["api"]: s["name"] for s in sites()}
+    out = []
+    for api, e in _learn_db().items():
+        ok, fail = _decayed(e, now)
+        out.append({"site": names.get(api, api), "api": api, "ok": round(ok, 1), "fail": round(fail, 1), "lock": learn_verdict(api)})
+    return web.json_response(sorted(out, key=lambda x: -(x["ok"] + x["fail"])))
+
+
+def with_learn(srcs, geo):
+    if not geo or geo in ("CN", "XX"):
+        return srcs
+    return [dict(s, lock=learn_verdict(s["api"])) for s in srcs]
+
+
 async def api_resolve(req):
     name, year = req.query.get("name", "").strip(), re.sub(r"\D", "", req.query.get("year", ""))[:4]
     full = req.query.get("full") == "1"
@@ -630,7 +715,7 @@ async def api_resolve(req):
     key = f"{canon(name)}|{year}"
     c = _cache.get("res:" + key)
     if c and time.time() - c[0] < 1800:
-        return web.json_response({"sources": c[1], "done": True, "geo": client_geo(req)})
+        return web.json_response({"sources": with_learn(c[1], client_geo(req)), "done": True, "geo": client_geo(req)})
     session = req.app["session"]
     tasks = _resolving.get(key)
     if not tasks:
@@ -655,7 +740,7 @@ async def api_resolve(req):
             if not first and any(t.result() for t in done):
                 first = time.time()
     found = [t.result() for t in tasks if t.done() and t.result()]
-    return web.json_response({"sources": order_sources(found), "done": all(t.done() for t in tasks), "geo": client_geo(req)})
+    return web.json_response({"sources": with_learn(order_sources(found), client_geo(req)), "done": all(t.done() for t in tasks), "geo": client_geo(req)})
 
 
 
@@ -734,6 +819,7 @@ async def on_start(app):
 
 
 async def on_stop(app):
+    _learn_save(force=True)
     t = app.get("sup")
     if t:
         t.cancel()
@@ -770,6 +856,8 @@ app.router.add_get("/api/shorts", api_shorts)
 app.router.add_get("/api/db/detail", api_db_detail)
 app.router.add_get("/api/db/related", api_db_related)
 app.router.add_get("/api/resolve", api_resolve)
+app.router.add_post("/api/learn", api_learn)
+app.router.add_get("/api/learned", api_learned)
 app.router.add_static("/static", STATIC)
 
 if __name__ == "__main__":

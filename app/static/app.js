@@ -282,7 +282,12 @@ const Modes = {
 let PROXIED = false;
 // 按接口地址和播放地址一起判断：CDN 域名会轮换（如 dytt-live → dytt-film），只看播放地址会漏判
 const GEO_LOCKED = /dytt|ffzy/i;
-const geoLocked = s => { const e = s.groups && s.groups[0] && s.groups[0].eps[0]; return GEO_LOCKED.test(s.api || "") || (e && GEO_LOCKED.test(e.url)) ? 1 : 0; };
+// 服务器学到的结论优先（s.lock：1 需中转 / 0 可直连），没学到时才用内置名单兜底
+const geoLocked = s => { if (s.lock === 1 || s.lock === 0) return s.lock; const e = s.groups && s.groups[0] && s.groups[0].eps[0]; return GEO_LOCKED.test(s.api || "") || (e && GEO_LOCKED.test(e.url)) ? 1 : 0; };
+// 开代理时把每次直连的成败报给服务器，用于学习（每个片源每次打开页面最多报一次成功）
+const _learned = new Set();
+const learn = (api, ok) => { if (!PROXIED || !api) return; if (ok) { if (_learned.has(api)) return; _learned.add(api); }
+  fetch("/api/learn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api, ok }) }).catch(() => { }); };
 
 /* 记住哪些片源直连不通、需要服务器中转（7 天） */
 const Relay = {
@@ -309,7 +314,7 @@ class Player {
       const order = new Map((list || []).map((s, i) => [s.api, i]));
       this.sources.sort((a, b) => (order.get(a.api) ?? 99) - (order.get(b.api) ?? 99));
       // 设备开着代理时，优先不挑 IP 的线路，只认国内 IP 的放后面（要用时自动经服务器中转）
-      if (PROXIED) { const late = s => geoLocked(s) || (Relay.get(s.api) ? 1 : 0); this.sources.sort((a, b) => late(a) - late(b)); }
+      if (PROXIED) { const late = s => s.lock === 0 ? 0 : (geoLocked(s) || (Relay.get(s.api) ? 1 : 0)); this.sources.sort((a, b) => late(a) - late(b)); }
     } else if (cur) this.si = this.sources.indexOf(cur);
     const s0 = this.sources[0];
     if (s0 && this.meta.fromCms && !this._filled) { // 搜索进来的：用片源信息补全详情
@@ -383,7 +388,7 @@ class Player {
       if (j < 0) { toast("还没有这一集"); return; } this.si = j; eps = this.eps();
     }
     const ep = eps[ei], src = this.sources[this.si];
-    if (!keepMode) this.proxy = REMOTE && (!!Relay.get(src.api) || (PROXIED && geoLocked(src))); // 记住了“直连不通”的站点，直接走中转
+    if (!keepMode) this.proxy = REMOTE && (PROXIED ? (src.lock === 0 ? false : (!!Relay.get(src.api) || !!geoLocked(src))) : !!Relay.get(src.api)); // 记住了“直连不通”的站点，直接走中转
     this.cleanup();
     $("#pnow").textContent = eps.length > 1 ? ep.name : "正片";
     $("#psrc").textContent = `· ${src.site}${this.proxy ? "（中转）" : ""}`;
@@ -394,7 +399,7 @@ class Player {
     let ok = false;
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };
     this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, REMOTE ? 25000 : 15000);
-    const onPlaying = () => { ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
+    const onPlaying = () => { if (!ok && !this.proxy) learn(src.api, true); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
     v.onplaying = onPlaying;
     v.onwaiting = () => { if (!ok) return; this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), REMOTE ? 30000 : 20000); };
     v.ontimeupdate = () => { if (ok) { clearTimeout(this.stall); this.save(v); } };
@@ -433,7 +438,7 @@ class Player {
     // 策略：先直连（切片不经过家里上行）；直连失败先让服务器中转同一线路再试（不少片源 CDN 只认国内家宽 IP，
     // 设备挂了代理/在海外时直连会 403），中转也不行才换下一条线路
     if (REMOTE && !this.proxy) {
-      this.dbad.add(this.si); Relay.set(cur.api, 1);
+      this.dbad.add(this.si); Relay.set(cur.api, 1); learn(cur.api, false);
       this.mask(`${cur.site} 直连不通，改由服务器中转…`); toast(`${cur.site} 直连${why}，改由服务器中转`);
       go(this.si, true); return;
     }
