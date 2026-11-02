@@ -374,7 +374,7 @@ class Player {
     $("#psrc").textContent = `· ${src.site}${this.proxy ? "（代理）" : ""}`;
     $("#pprev").style.display = $("#pnext").style.display = eps.length > 1 ? "" : "none";
     this.mask(`正在连接 ${src.site}…`); this.renderEps();
-    const mixed = location.protocol === "https:" && /^http:\/\//i.test(ep.url);
+    const mixed = !REMOTE || /^http:\/\//i.test(ep.url); // 局域网访问时一律经 N1 中转（家里设备走代理会被片源 CDN 拒绝）；https 页面里的 http 资源也必须中转
     const url = /\.m3u8/i.test(ep.url) ? `/m3u8?url=${enc(ep.url)}${this.proxy ? "&proxy=1" : ""}${localStorage.noad === "0" ? "&noad=0" : ""}` : ((this.proxy || mixed) ? `/seg?url=${enc(ep.url)}` : ep.url);
     let ok = false;
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };

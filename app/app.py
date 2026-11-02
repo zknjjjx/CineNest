@@ -274,8 +274,10 @@ def is_https(req):
 
 async def m3u8(req):
     url = req.query.get("url", "")
-    full = req.query.get("proxy") == "1"
     secure = is_https(req)
+    # 局域网（http）访问时，切片一律经本机中转：家里设备走透明代理时，境外片源 CDN 常对代理出口 403 或很慢，
+    # 而本机容器是直连家宽。经隧道（https）访问的外网设备仍让切片直连，不占家里上行。
+    full = req.query.get("proxy") == "1" or (not secure and req.query.get("direct") != "1")
     noad = req.query.get("noad", "1") == "1"
     if not url.startswith("http"):
         return web.Response(status=400, text="bad url")
