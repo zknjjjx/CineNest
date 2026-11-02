@@ -286,8 +286,22 @@ const GEO_LOCKED = /dytt|ffzy/i;
 const geoLocked = s => { if (s.lock === 1 || s.lock === 0) return s.lock; const e = s.groups && s.groups[0] && s.groups[0].eps[0]; return GEO_LOCKED.test(s.api || "") || (e && GEO_LOCKED.test(e.url)) ? 1 : 0; };
 // 开代理时把每次直连的成败报给服务器，用于学习（每个片源每次打开页面最多报一次成功）
 const _learned = new Set();
-const learn = (api, ok) => { if (!PROXIED || !api) return; if (ok) { if (_learned.has(api)) return; _learned.add(api); }
-  fetch("/api/learn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api, ok }) }).catch(() => { }); };
+const learnSend = (o, beacon) => { const b = JSON.stringify(o);
+  if (beacon && navigator.sendBeacon) navigator.sendBeacon("/api/learn", new Blob([b], { type: "application/json" }));
+  else fetch("/api/learn", { method: "POST", headers: { "Content-Type": "application/json" }, body: b, keepalive: true }).catch(() => { }); };
+const learn = (api, ok) => { if (!PROXIED || !api) return; if (ok) { if (_learned.has(api)) return; _learned.add(api); } learnSend({ api, ok }); };
+/* 流畅度：公网播放时统计起播耗时、观看与卡顿时长，换源/离开时上报（服务器只用直连的数据给线路排序） */
+const QS = {
+  cur: null,
+  begin(api, relay) { this.flush(); if (REMOTE) this.cur = { api, relay, t0: Date.now(), ttff: null, watch: 0, stall: 0, ws: 0, lt: 0 }; },
+  playing() { const c = this.cur; if (!c) return; const n = Date.now(); if (c.ttff == null) c.ttff = n - c.t0; if (c.ws) { c.stall += n - c.ws; c.ws = 0; } c.lt = n; },
+  waiting() { const c = this.cur; if (c && c.ttff != null && !c.ws) c.ws = Date.now(); },
+  tick() { const c = this.cur; if (!c || c.ttff == null || c.ws) return; const n = Date.now(); if (c.lt) c.watch += Math.min(n - c.lt, 2000); c.lt = n; },
+  flush(beacon) { const c = this.cur; this.cur = null; if (!c || c.ttff == null) return; if (c.ws) c.stall += Date.now() - c.ws;
+    if (c.watch + c.stall < 20000) return; learnSend({ api: c.api, relay: c.relay, ttff: c.ttff, watch: c.watch / 1000, stall: c.stall / 1000 }, beacon); }
+};
+addEventListener("pagehide", () => QS.flush(true));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") QS.flush(true); });
 
 /* 记住哪些片源直连不通、需要服务器中转（7 天） */
 const Relay = {
@@ -314,7 +328,13 @@ class Player {
       const order = new Map((list || []).map((s, i) => [s.api, i]));
       this.sources.sort((a, b) => (order.get(a.api) ?? 99) - (order.get(b.api) ?? 99));
       // 设备开着代理时，优先不挑 IP 的线路，只认国内 IP 的放后面（要用时自动经服务器中转）
-      if (PROXIED) { const late = s => s.lock === 0 ? 0 : (geoLocked(s) || (Relay.get(s.api) ? 1 : 0)); this.sources.sort((a, b) => late(a) - late(b)); }
+      // 公网访问时按“流畅”排序：能直连的优先（中转占家里上行、带宽小），其次集数全，再按学到的流畅度 q（没数据按中等算，顺便试探）
+      if (REMOTE) {
+        const maxE = Math.max(0, ...this.sources.map(s => s.groups[0].eps.length));
+        const late = s => !PROXIED ? 0 : s.lock === 0 ? 0 : (geoLocked(s) || (Relay.get(s.api) ? 1 : 0));
+        const key = s => [late(s), s.groups[0].eps.length < maxE ? 1 : 0, s.q ?? 5];
+        this.sources.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+      }
     } else if (cur) this.si = this.sources.indexOf(cur);
     const s0 = this.sources[0];
     if (s0 && this.meta.fromCms && !this._filled) { // 搜索进来的：用片源信息补全详情
@@ -399,10 +419,11 @@ class Player {
     let ok = false;
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };
     this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, REMOTE ? 25000 : 15000);
-    const onPlaying = () => { if (!ok && !this.proxy) learn(src.api, true); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
+    QS.begin(src.api, this.proxy || mixed);
+    const onPlaying = () => { QS.playing(); if (!ok && !this.proxy) learn(src.api, true); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
     v.onplaying = onPlaying;
-    v.onwaiting = () => { if (!ok) return; this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), REMOTE ? 30000 : 20000); };
-    v.ontimeupdate = () => { if (ok) { clearTimeout(this.stall); this.save(v); } };
+    v.onwaiting = () => { if (!ok) return; if (!v.seeking) QS.waiting(); this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), REMOTE ? 30000 : 20000); };
+    v.ontimeupdate = () => { if (ok) { QS.tick(); clearTimeout(this.stall); this.save(v); } };
     v.onended = () => { if (this.ei + 1 < this.eps().length) this.play(this.ei + 1, 0); };
     const begin = () => {
       if (at > 3) { try { v.currentTime = at; } catch (e) { } }
@@ -448,7 +469,7 @@ class Player {
     if (nx >= 0) { const r = REMOTE && !!Relay.get(this.sources[nx].api); toast(`${cur.site} ${why}，已切到 ${this.sources[nx].site}`); go(nx, r); return; }
     this.cleanup(); this.mask("所有线路都无法播放，稍后再试"); this.status(); toast("所有线路都无法播放");
   }
-  cleanup() { clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
+  cleanup() { QS.flush(); clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
   save(v, force) {
     const now = Date.now(); if (!force && now - (this._sv || 0) < 4000) return; this._sv = now;
     const old = H.get(this.key) || {}; const seen = new Set(old.seen || []); seen.add(this.ei);

@@ -622,9 +622,12 @@ def client_geo(req):
     return (req.headers.get("CF-IPCountry") or "").upper()
 
 
-# ---------- 学习：开代理（出口不在国内）的访客直连各片源是否成功 ----------
-# 前端在“出口不在 CN”时上报每次直连的成败；按片源接口累计，14 天半衰期衰减。
-# 判定：失败明显多于成功 → 需中转（排后、一开始就中转）；成功明显多于失败 → 可直连（排前）。
+# ---------- 学习：公网访客播放各片源的效果 ----------
+# 前端经公网（Cloudflare）播放时上报：直连成败，以及每次播放的起播耗时和卡顿占比。
+# 按访客出口分两类学习：px（出口不在国内，设备开着代理/在海外）、cn（国内出口）。局域网访问不计。
+# 1) 可达性（仅 px）：直连失败明显多 → lock=1（需中转，排最后、一开始就中转）；成功明显多 → lock=0。
+# 2) 流畅度（px、cn 各自，只统计直连）：q = 卡顿占比×100 + 起播秒数，越小越流畅，用于排序。
+# 中转会占家里上行（带宽小），所以能直连且流畅的线路永远优先，中转只做兜底。
 LEARN_FILE = os.path.join(DATA, "geolearn.json")
 LEARN_HALF = 14 * 86400
 _learn = {"d": None, "dirty": False, "saved": 0}
@@ -633,27 +636,44 @@ _learn = {"d": None, "dirty": False, "saved": 0}
 def _learn_db():
     if _learn["d"] is None:
         try:
-            _learn["d"] = json.load(open(LEARN_FILE, encoding="utf-8"))
+            d = json.load(open(LEARN_FILE, encoding="utf-8"))
         except Exception:
-            _learn["d"] = {}
+            d = {}
+        if "lock" not in d:          # 旧格式（v28）：顶层就是各片源的成败计数
+            d = {"lock": d, "q": {}}
+        d.setdefault("q", {})
+        _learn["d"] = d
     return _learn["d"]
 
 
-def _decayed(e, now):
-    k = 0.5 ** ((now - e.get("t", now)) / LEARN_HALF)
-    return e.get("ok", 0) * k, e.get("fail", 0) * k
+def _k(t, now):
+    return 0.5 ** ((now - t) / LEARN_HALF)
 
 
 def learn_verdict(api):
-    e = _learn_db().get(api)
+    e = _learn_db()["lock"].get(api)
     if not e:
         return None
-    ok, fail = _decayed(e, time.time())
+    k = _k(e.get("t", time.time()), time.time())
+    ok, fail = e.get("ok", 0) * k, e.get("fail", 0) * k
     if fail >= 1.8 and fail > ok * 2:
-        return 1   # 代理出口直连不通，需要中转
+        return 1
     if ok >= 1.8 and ok > fail * 2:
-        return 0   # 代理出口也能直连
+        return 0
     return None
+
+
+def learn_quality(bucket, api):
+    e = _learn_db()["q"].get(bucket, {}).get(api)
+    if not e or e.get("n", 0) * _k(e.get("t", 0), time.time()) < 1.5:
+        return None
+    return round(e["sr"] * 100 + e["ttff"] / 1000, 2)
+
+
+def _bucket(geo):
+    if not geo or geo == "XX":
+        return None
+    return "cn" if geo == "CN" else "px"
 
 
 def _learn_save(force=False):
@@ -668,43 +688,66 @@ def _learn_save(force=False):
         pass
 
 
+def _num(v, lo, hi):
+    try:
+        return min(max(float(v), lo), hi)
+    except Exception:
+        return None
+
+
 async def api_learn(req):
-    geo = client_geo(req)
-    if not geo or geo in ("CN", "XX"):   # 只学开代理/海外出口；局域网和国内出口不计
+    bucket = _bucket(client_geo(req))
+    if not bucket:                       # 局域网或未知出口不计
         return web.json_response({"ok": False})
     try:
-        b = await req.json()
+        b = await req.json() if req.content_type == "application/json" else json.loads(await req.text())
     except Exception:
         return web.json_response({"ok": False}, status=400)
-    api, good = str(b.get("api", "")), bool(b.get("ok"))
+    api = str(b.get("api", ""))
     if not site_by_api(api):             # 只接受已知片源，防止乱写
         return web.json_response({"ok": False}, status=400)
-    now = time.time()
-    db = _learn_db()
-    e = db.get(api) or {}
-    ok, fail = _decayed(e, now) if e else (0.0, 0.0)
-    if good: ok += 1
-    else: fail += 1
-    db[api] = {"ok": round(min(ok, 50), 3), "fail": round(min(fail, 50), 3), "t": now}
+    now, db = time.time(), _learn_db()
+    if "ok" in b and bucket == "px":     # 可达性：只学代理出口的直连成败
+        e = db["lock"].get(api) or {"ok": 0, "fail": 0, "t": now}
+        k = _k(e["t"], now)
+        ok, fail = e["ok"] * k + (1 if b["ok"] else 0), e["fail"] * k + (0 if b["ok"] else 1)
+        db["lock"][api] = {"ok": round(min(ok, 50), 3), "fail": round(min(fail, 50), 3), "t": now}
+    ttff, watch, stall = _num(b.get("ttff"), 0, 60000), _num(b.get("watch"), 0, 86400), _num(b.get("stall"), 0, 86400)
+    if ttff is not None and watch is not None and stall is not None and not b.get("relay") and watch + stall >= 20:
+        sr = stall / (watch + stall)
+        q = db["q"].setdefault(bucket, {})
+        e = q.get(api)
+        if e:
+            n = e["n"] * _k(e["t"], now)
+            a = max(0.25, 1 / (n + 1))       # 前几次快速收敛，之后按指数移动平均
+            e.update(ttff=round(e["ttff"] * (1 - a) + ttff * a), sr=round(e["sr"] * (1 - a) + sr * a, 4), n=round(min(n + 1, 50), 3), t=now)
+        else:
+            q[api] = {"ttff": round(ttff), "sr": round(sr, 4), "n": 1, "t": now}
     _learn["dirty"] = True
     _learn_save()
-    return web.json_response({"ok": True, "lock": learn_verdict(api)})
+    return web.json_response({"ok": True})
 
 
 async def api_learned(req):
-    now = time.time()
     names = {s["api"]: s["name"] for s in sites()}
-    out = []
-    for api, e in _learn_db().items():
-        ok, fail = _decayed(e, now)
-        out.append({"site": names.get(api, api), "api": api, "ok": round(ok, 1), "fail": round(fail, 1), "lock": learn_verdict(api)})
-    return web.json_response(sorted(out, key=lambda x: -(x["ok"] + x["fail"])))
+    db, out = _learn_db(), {}
+    apis = set(db["lock"]) | {a for b in db["q"].values() for a in b}
+    rows = []
+    for api in apis:
+        r = {"site": names.get(api, api), "lock": learn_verdict(api)}
+        for bk in ("px", "cn"):
+            e = db["q"].get(bk, {}).get(api)
+            if e:
+                r[bk] = {"q": learn_quality(bk, api), "起播ms": e["ttff"], "卡顿%": round(e["sr"] * 100, 1), "次数": round(e["n"], 1)}
+        rows.append(r)
+    return web.json_response(rows)
 
 
 def with_learn(srcs, geo):
-    if not geo or geo in ("CN", "XX"):
+    bucket = _bucket(geo)
+    if not bucket:
         return srcs
-    return [dict(s, lock=learn_verdict(s["api"])) for s in srcs]
+    return [dict(s, q=learn_quality(bucket, s["api"]), **({"lock": learn_verdict(s["api"])} if bucket == "px" else {})) for s in srcs]
 
 
 async def api_resolve(req):
