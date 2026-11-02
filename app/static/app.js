@@ -306,8 +306,10 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 /* 记住哪些片源直连不通、需要服务器中转（7 天） */
 const Relay = {
   m() { try { return JSON.parse(localStorage.relay || "{}"); } catch (e) { return {}; } },
-  get(api) { const t = this.m()[api]; return t && Date.now() - t < 7 * 864e5; },
-  set(api, on) { const m = this.m(); if (on) m[api] = Date.now(); else delete m[api]; localStorage.relay = JSON.stringify(m); }
+  // 按网络环境分开记：同一台设备开代理时要中转的站，关掉代理后往往又能直连
+  k(api) { return (PROXIED ? "px|" : "") + api; },
+  get(api) { const t = this.m()[this.k(api)]; return t && Date.now() - t < 7 * 864e5; },
+  set(api, on) { const m = this.m(), k = this.k(api); if (on) m[k] = Date.now(); else delete m[k]; localStorage.relay = JSON.stringify(m); }
 };
 
 /* ---------- 播放器：自动选最快源 + 故障自动换源 ---------- */
