@@ -616,6 +616,12 @@ def order_sources(found):
     return sorted(found, key=lambda f: (len(f["groups"][0]["eps"]) < maxep, f["ms"] + f["rank"] * 30))
 
 
+def client_geo(req):
+    """经 Cloudflare 访问时，访客出口所在国家（CF-IPCountry）。不是 CN 说明设备开着代理/在海外，
+    这时不少片源 CDN（只认国内 IP）会拒绝直连。局域网访问返回空。"""
+    return (req.headers.get("CF-IPCountry") or "").upper()
+
+
 async def api_resolve(req):
     name, year = req.query.get("name", "").strip(), re.sub(r"\D", "", req.query.get("year", ""))[:4]
     full = req.query.get("full") == "1"
@@ -624,7 +630,7 @@ async def api_resolve(req):
     key = f"{canon(name)}|{year}"
     c = _cache.get("res:" + key)
     if c and time.time() - c[0] < 1800:
-        return web.json_response({"sources": c[1], "done": True})
+        return web.json_response({"sources": c[1], "done": True, "geo": client_geo(req)})
     session = req.app["session"]
     tasks = _resolving.get(key)
     if not tasks:
@@ -649,7 +655,7 @@ async def api_resolve(req):
             if not first and any(t.result() for t in done):
                 first = time.time()
     found = [t.result() for t in tasks if t.done() and t.result()]
-    return web.json_response({"sources": order_sources(found), "done": all(t.done() for t in tasks)})
+    return web.json_response({"sources": order_sources(found), "done": all(t.done() for t in tasks), "geo": client_geo(req)})
 
 
 

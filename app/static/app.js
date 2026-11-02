@@ -278,6 +278,11 @@ const Modes = {
   },
 };
 
+/* 只认国内 IP 的片源 CDN（海外/代理出口直连会 403）。PROXIED：服务器看到的访客出口不在国内 */
+let PROXIED = false;
+const GEO_LOCKED = /dytt-live|ffzy-online/i;
+const geoLocked = s => { const e = s.groups && s.groups[0] && s.groups[0].eps[0]; return e && GEO_LOCKED.test(e.url) ? 1 : 0; };
+
 /* 记住哪些片源直连不通、需要服务器中转（7 天） */
 const Relay = {
   m() { try { return JSON.parse(localStorage.relay || "{}"); } catch (e) { return {}; } },
@@ -292,7 +297,7 @@ class Player {
   async resolve() {
     const q = `/api/resolve?name=${enc(this.meta.title)}&year=${enc(this.meta.year || "")}`;
     const d = await J(q).catch(() => ({ sources: [] })); if (!this.alive()) return;
-    this.merge(d.sources); this.resolved = true; this.status();
+    PROXIED = REMOTE && !!d.geo && d.geo !== "CN" && d.geo !== "XX"; this.merge(d.sources); this.resolved = true; this.status();
     if (!d.done) J(q + "&full=1").then(f => { if (this.alive()) { this.merge(f.sources); this.status(); } }).catch(() => { });
   }
   merge(list) {
@@ -302,6 +307,8 @@ class Player {
     if (!this.started) { // 还没开播时按后端顺序（集数全 + 最快）
       const order = new Map((list || []).map((s, i) => [s.api, i]));
       this.sources.sort((a, b) => (order.get(a.api) ?? 99) - (order.get(b.api) ?? 99));
+      // 设备开着代理时，优先不挑 IP 的线路，只认国内 IP 的放后面（要用时自动经服务器中转）
+      if (PROXIED) this.sources.sort((a, b) => geoLocked(a) - geoLocked(b));
     } else if (cur) this.si = this.sources.indexOf(cur);
     const s0 = this.sources[0];
     if (s0 && this.meta.fromCms && !this._filled) { // 搜索进来的：用片源信息补全详情
@@ -375,7 +382,7 @@ class Player {
       if (j < 0) { toast("还没有这一集"); return; } this.si = j; eps = this.eps();
     }
     const ep = eps[ei], src = this.sources[this.si];
-    if (!keepMode) this.proxy = REMOTE && !!Relay.get(src.api); // 记住了“直连不通”的站点，直接走中转
+    if (!keepMode) this.proxy = REMOTE && (!!Relay.get(src.api) || (PROXIED && geoLocked(src))); // 记住了“直连不通”的站点，直接走中转
     this.cleanup();
     $("#pnow").textContent = eps.length > 1 ? ep.name : "正片";
     $("#psrc").textContent = `· ${src.site}${this.proxy ? "（中转）" : ""}`;
