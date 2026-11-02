@@ -280,8 +280,9 @@ const Modes = {
 
 /* 只认国内 IP 的片源 CDN（海外/代理出口直连会 403）。PROXIED：服务器看到的访客出口不在国内 */
 let PROXIED = false;
-const GEO_LOCKED = /dytt-live|ffzy-online/i;
-const geoLocked = s => { const e = s.groups && s.groups[0] && s.groups[0].eps[0]; return e && GEO_LOCKED.test(e.url) ? 1 : 0; };
+// 按接口地址和播放地址一起判断：CDN 域名会轮换（如 dytt-live → dytt-film），只看播放地址会漏判
+const GEO_LOCKED = /dytt|ffzy/i;
+const geoLocked = s => { const e = s.groups && s.groups[0] && s.groups[0].eps[0]; return GEO_LOCKED.test(s.api || "") || (e && GEO_LOCKED.test(e.url)) ? 1 : 0; };
 
 /* 记住哪些片源直连不通、需要服务器中转（7 天） */
 const Relay = {
@@ -308,7 +309,7 @@ class Player {
       const order = new Map((list || []).map((s, i) => [s.api, i]));
       this.sources.sort((a, b) => (order.get(a.api) ?? 99) - (order.get(b.api) ?? 99));
       // 设备开着代理时，优先不挑 IP 的线路，只认国内 IP 的放后面（要用时自动经服务器中转）
-      if (PROXIED) this.sources.sort((a, b) => geoLocked(a) - geoLocked(b));
+      if (PROXIED) { const late = s => geoLocked(s) || (Relay.get(s.api) ? 1 : 0); this.sources.sort((a, b) => late(a) - late(b)); }
     } else if (cur) this.si = this.sources.indexOf(cur);
     const s0 = this.sources[0];
     if (s0 && this.meta.fromCms && !this._filled) { // 搜索进来的：用片源信息补全详情
