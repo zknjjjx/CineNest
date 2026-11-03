@@ -334,11 +334,13 @@ class Player {
       this.sources.sort((a, b) => (order.get(a.api) ?? 99) - (order.get(b.api) ?? 99));
       // 设备开着代理时，优先不挑 IP 的线路，只认国内 IP 的放后面（要用时自动经服务器中转）
       // 公网访问时按“流畅”排序：能直连的优先（中转占家里上行、带宽小），其次集数全，再按学到的流畅度 q（没数据按中等算，顺便试探）
-      if (REMOTE) {
+      // 画质：1080P 及以上优先，其次 720P（没数据按 720 算），再低的往后（按片源学到的分辨率）
+      {
         const maxE = Math.max(0, ...this.sources.map(s => s.groups[0].eps.length));
-        const late = s => !PROXIED ? 0 : s.lock === 0 ? 0 : (geoLocked(s) || (Relay.get(s.api) ? 1 : 0));
-        const key = s => [late(s), s.groups[0].eps.length < maxE ? 1 : 0, s.q ?? 5];
-        this.sources.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+        const late = s => !REMOTE || !PROXIED ? 0 : s.lock === 0 ? 0 : (geoLocked(s) || (Relay.get(s.api) ? 1 : 0));
+        const tier = s => !s.res ? 1 : s.res >= 1000 ? 0 : s.res >= 700 ? 1 : 2;
+        const key = s => [late(s), s.groups[0].eps.length < maxE ? 1 : 0, tier(s), REMOTE ? s.q ?? 5 : 0];
+        this.sources.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3]; });
       }
     } else if (cur) this.si = this.sources.indexOf(cur);
     const s0 = this.sources[0];
@@ -425,8 +427,8 @@ class Player {
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };
     this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, REMOTE ? 25000 : 15000);
     QS.begin(src.api, this.proxy || mixed);
-    this._relay = this.proxy || mixed; this._bw = 0; this.showInfo(); this.infoT = setInterval(() => this.showInfo(), 1500);
-    const onPlaying = () => { QS.playing(); if (!ok && !this.proxy) learn(src.api, true); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
+    this._relay = this.proxy || mixed; this._bw = 0; this._okAt = 0; this._maxH = 0; this._resSent = false; this._api = src.api; this.showInfo(); this.infoT = setInterval(() => this.showInfo(), 1500);
+    const onPlaying = () => { if (!this._okAt) this._okAt = Date.now(); QS.playing(); if (!ok && !this.proxy) learn(src.api, true); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
     v.onplaying = onPlaying;
     v.onwaiting = () => { if (!ok) return; if (!v.seeking) QS.waiting(); this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), REMOTE ? 30000 : 20000); };
     v.ontimeupdate = () => { if (ok) { QS.tick(); clearTimeout(this.stall); this.save(v); } };
@@ -480,6 +482,8 @@ class Player {
     const el = $("#pinfo"), v = $("#pv"); if (!el || !v) return;
     const lab = h => !h ? "" : h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P";
     const h = v.videoHeight, lv = this.hls && this.hls.levels || [], mx = Math.max(0, ...lv.map(l => l.height || 0));
+    this._maxH = Math.max(this._maxH || 0, h || 0, mx);
+    if (this._okAt && !this._resSent && this._maxH && Date.now() - this._okAt > 30000) { this._resSent = true; learnSend({ api: this._api, h: this._maxH }); }
     const res = h ? (mx > h + 40 ? `${lab(h)}（最高 ${lab(mx)}）` : lab(h)) : "";
     const bw = this._bw, spd = bw ? (bw >= 1048576 ? (bw / 1048576).toFixed(1) + " MB/s" : Math.round(bw / 1024) + " KB/s") : "";
     el.innerHTML = `<i class="${this._relay ? "rl" : "dr"}"></i>${this._relay ? "中转" : "直连"}${res ? `<em class="${h && h < 700 ? "low" : ""}" title="片源视频本身的分辨率">${res}</em>` : ""}${spd ? `<em class="spd">${spd}</em>` : ""}`;

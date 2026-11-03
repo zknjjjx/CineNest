@@ -642,6 +642,7 @@ def _learn_db():
         if "lock" not in d:          # 旧格式（v28）：顶层就是各片源的成败计数
             d = {"lock": d, "q": {}}
         d.setdefault("q", {})
+        d.setdefault("res", {})
         _learn["d"] = d
     return _learn["d"]
 
@@ -668,6 +669,11 @@ def learn_quality(bucket, api):
     if not e or e.get("n", 0) * _k(e.get("t", 0), time.time()) < 1.5:
         return None
     return round(e["sr"] * 100 + e["ttff"] / 1000, 2)
+
+
+def learn_res(api):
+    e = _learn_db()["res"].get(api)
+    return e["h"] if e else None
 
 
 def _bucket(geo):
@@ -697,8 +703,6 @@ def _num(v, lo, hi):
 
 async def api_learn(req):
     bucket = _bucket(client_geo(req))
-    if not bucket:                       # 局域网或未知出口不计
-        return web.json_response({"ok": False})
     try:
         b = await req.json() if req.content_type == "application/json" else json.loads(await req.text())
     except Exception:
@@ -707,6 +711,15 @@ async def api_learn(req):
     if not site_by_api(api):             # 只接受已知片源，防止乱写
         return web.json_response({"ok": False}, status=400)
     now, db = time.time(), _learn_db()
+    h = _num(b.get("h"), 0, 4320)
+    if h and h >= 144:                   # 分辨率与网络无关，局域网也收：按片源做指数移动平均
+        e = db["res"].get(api)
+        db["res"][api] = {"h": round(e["h"] * 0.7 + h * 0.3) if e else round(h), "n": min((e or {}).get("n", 0) + 1, 99), "t": now}
+        _learn["dirty"] = True
+        _learn_save()
+        return web.json_response({"ok": True})
+    if not bucket:                       # 局域网或未知出口不计
+        return web.json_response({"ok": False})
     if "ok" in b and bucket == "px":     # 可达性：只学代理出口的直连成败
         e = db["lock"].get(api) or {"ok": 0, "fail": 0, "t": now}
         k = _k(e["t"], now)
@@ -731,10 +744,10 @@ async def api_learn(req):
 async def api_learned(req):
     names = {s["api"]: s["name"] for s in sites()}
     db, out = _learn_db(), {}
-    apis = set(db["lock"]) | {a for b in db["q"].values() for a in b}
+    apis = set(db["lock"]) | set(db["res"]) | {a for b in db["q"].values() for a in b}
     rows = []
     for api in apis:
-        r = {"site": names.get(api, api), "lock": learn_verdict(api)}
+        r = {"site": names.get(api, api), "lock": learn_verdict(api), "res": learn_res(api)}
         for bk in ("px", "cn"):
             e = db["q"].get(bk, {}).get(api)
             if e:
@@ -746,8 +759,8 @@ async def api_learned(req):
 def with_learn(srcs, geo):
     bucket = _bucket(geo)
     if not bucket:
-        return srcs
-    return [dict(s, q=learn_quality(bucket, s["api"]), **({"lock": learn_verdict(s["api"])} if bucket == "px" else {})) for s in srcs]
+        return [dict(s, res=learn_res(s["api"])) for s in srcs]
+    return [dict(s, res=learn_res(s["api"]), q=learn_quality(bucket, s["api"]), **({"lock": learn_verdict(s["api"])} if bucket == "px" else {})) for s in srcs]
 
 
 async def api_resolve(req):
