@@ -209,18 +209,24 @@ const Modes = {
     try { if (screen.orientation && screen.orientation.lock && (!v.videoWidth || v.videoWidth >= v.videoHeight)) await screen.orientation.lock("landscape"); } catch (e) { }
   },
   unlock() { try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) { } },
-  async pip(v) {
+  // 悬浮：必须在点击里同步调用（iOS 要求用户手势，前面不能有 await），优先 WebKit 原生呈现模式
+  pip(v) {
+    const exitPip = () => { if (document.pictureInPictureElement && document.exitPictureInPicture) document.exitPictureInPicture().catch(() => { }); else if (v.webkitSetPresentationMode) v.webkitSetPresentationMode("inline"); };
+    if (this.inPip(v)) return exitPip();
+    if (v.readyState < 1) { toast("视频开始播放后才能悬浮"); return; }
+    v.disablePictureInPicture = false; v.removeAttribute("disablepictureinpicture");
+    if (this.rfsOn()) document.body.classList.remove("rfs");
+    this.mark(v);
+    const why = e => { const sa = navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+      toast(`悬浮没成功（${e && e.name || "系统未响应"}）${sa ? "。可先点全屏，再点左上角小窗图标" : ""}`, 5000); };
     try {
-      if (this.inPip(v)) { if (document.exitPictureInPicture && document.pictureInPictureElement) await document.exitPictureInPicture(); else v.webkitSetPresentationMode("inline"); return; }
-      if (this.fsEl()) await this.exitFs();
-      this.mark(v);
-      if (v.requestPictureInPicture) await v.requestPictureInPicture(); else v.webkitSetPresentationMode("picture-in-picture");
-    } catch (e) {
-      const standalone = navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-      if (standalone && (IS_IOS || IS_SAFARI)) toast("从主屏幕图标打开时，iOS 不允许悬浮播放。想用悬浮，请在 Safari 里打开本站", 5000);
-      else if (!v.currentSrc) toast("视频开始播放后才能悬浮");
-      else toast("当前浏览器不支持悬浮播放");
-    }
+      if (typeof v.webkitSetPresentationMode === "function" && (!v.webkitSupportsPresentationMode || v.webkitSupportsPresentationMode("picture-in-picture"))) {
+        v.webkitSetPresentationMode("picture-in-picture");
+        setTimeout(() => { if (!this.inPip(v)) why(); }, 1200); return;
+      }
+      if (v.requestPictureInPicture) { v.requestPictureInPicture().catch(why); return; }
+      toast("当前浏览器不支持悬浮播放");
+    } catch (e) { why(e); }
   },
   async exitFs() { try { if (document.exitFullscreen) await document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) { } },
   // iPhone Safari 不支持网页全屏和锁定横屏：用"旋转铺满"模拟横屏全屏，不依赖系统自动转屏
@@ -234,8 +240,10 @@ const Modes = {
     if (this.rfsOn()) return this.exitRfs(v);
     if (this.fsEl()) return this.exitFs();
     if (!wrap.requestFullscreen && !wrap.webkitRequestFullscreen && v.webkitEnterFullscreen) {
+      // iPhone：用系统原生全屏（自带画中画图标、跟随手机自动横屏），在点击里同步调用；失败才退回“旋转铺满”
       if (this.inPip(v)) v.webkitSetPresentationMode("inline");
-      return this.enterRfs(v);
+      this.mark(v);
+      try { if (v.readyState < 1) throw 0; v.webkitEnterFullscreen(); return; } catch (e) { return this.enterRfs(v); }
     }
     this.mark(v);
     try {
@@ -452,7 +460,7 @@ class Player {
   }
   ensurePlayer() {
     if ($("#pwrap")) return $("#pv");
-    $("#pslot").innerHTML = `<div class="pwrap" id="pwrap"><video id="pv" controls playsinline webkit-playsinline x5-playsinline x5-video-player-type="h5-page" x-webkit-airplay="allow" preload="auto"></video><button class="rfs-x" id="rfsx" aria-label="退出全屏"><svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="pmask" id="pmask"><div class="spin"></div><span id="pmt">加载中…</span></div></div>
+    $("#pslot").innerHTML = `<div class="pwrap" id="pwrap"><video id="pv" controls autopictureinpicture playsinline webkit-playsinline x5-playsinline x5-video-player-type="h5-page" x-webkit-airplay="allow" preload="auto"></video><button class="rfs-x" id="rfsx" aria-label="退出全屏"><svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="pmask" id="pmask"><div class="spin"></div><span id="pmt">加载中…</span></div></div>
       <div class="pbar"><span class="now" id="pnow"></span><span id="psrc"></span><span class="pinfo" id="pinfo"></span><span class="sp"></span><button class="pill" id="pprev">上一集</button><button class="pill" id="pnext">下一集</button><button class="pill" id="pswitch">换源</button><button class="pill ic" id="ppip" title="悬浮播放"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11h7v6h-7z"/></svg><span>悬浮</span></button><button class="pill ic" id="pfs" title="全屏"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>全屏</span></button></div>`;
     $("#pprev").onclick = () => this.ei > 0 && this.play(this.ei - 1, 0);
     $("#pnext").onclick = () => this.ei + 1 < this.eps().length && this.play(this.ei + 1, 0);
@@ -460,7 +468,7 @@ class Player {
     const v0 = $("#pv");
     $("#pfs").onclick = () => Modes.fullscreen(v0, $("#pwrap"));
     $("#rfsx").onclick = () => Modes.exitRfs(v0);
-    if (Modes.pipOK(v0)) $("#ppip").onclick = () => Modes.pip(v0); else $("#ppip").style.display = "none";
+    if (Modes.pipOK(v0)) $("#ppip").onclick = e => { e.preventDefault(); Modes.pip(v0); }; else $("#ppip").style.display = "none";
     Modes.bind(v0);
     $("#acts").style.display = "none";
     $("#pslot").classList.add("stick");
