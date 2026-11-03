@@ -541,3 +541,17 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
   .epdr-l button.on span{opacity:1;background:linear-gradient(100deg,var(--ac),var(--ac2) 40%,#fff1d6 50%,var(--ac2) 60%,var(--ac));background-size:220% 100%;-webkit-background-clip:text;background-clip:text;animation:shine 4s linear infinite}
 }
 @media (prefers-reduced-motion:reduce){.epdr-p{transition:none}.epdr-h span,.epdr-l button.on span{animation:none}}
+
+/* v41 手机：播放栏两行自适应、提示自动换行、页面不横向溢出 */
+@media (max-width:760px){
+  html,body{overflow-x:clip;max-width:100%}
+  .pbar{flex-wrap:wrap!important;row-gap:8px;padding-top:8px}
+  .pbar .now{flex:none}
+  #psrc{flex:0 1 auto!important;min-width:0}
+  .pbar .pinfo{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+  .pbar .sp{display:block!important;flex:0 0 100%;height:0}
+  .pbar .pill{flex:1 1 0!important;min-width:0;display:inline-flex;align-items:center;justify-content:center;padding:7px 4px!important;font-size:13px;white-space:nowrap}
+  .pbar .pill.ic span{display:inline}
+  #toast{white-space:normal;width:max-content;max-width:calc(100vw - 32px);text-align:center;border-radius:14px;line-height:1.5;padding:9px 16px}
+}
+@media (max-width:360px){.pbar .pill.ic span{display:none}}
