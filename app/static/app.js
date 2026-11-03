@@ -285,35 +285,38 @@ const Modes = {
 let PROXIED = false;
 /* 测速：直接拉第一段切片，按实际下载速度给线路排名（不再做长期学习） */
 const NATIVE_HLS = () => { const v = document.createElement("video"); return !!v.canPlayType("application/vnd.apple.mpegurl") && (IS_IOS || IS_SAFARI || !(window.Hls && Hls.isSupported())); };
-async function speedTest(epUrl, budget) {
-  const t0 = performance.now(), ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), budget);
+// 返回 >0 的下载速度（字节/秒）；-1 = 不通；超时但已收到数据按实际速度算（慢，不算不通）
+async function speedTest(epUrl, budget, cap) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), budget);
+  let t1 = 0, n = 0;
   try {
     let seg = epUrl;
     if (/\.m3u8/i.test(epUrl)) {
       let pl = `/m3u8?url=${enc(epUrl)}`;
       for (let k = 0; k < 2; k++) {
-        const txt = await (await fetch(pl, { signal: ctl.signal })).text();
-        const ls = txt.split("\n").map(x => x.trim()).filter(x => x && !x.startsWith("#"));
-        if (!ls.length) throw 0;
+        const r = await fetch(pl, { signal: ctl.signal }); if (!r.ok) return -1;
+        const ls = (await r.text()).split("\n").map(x => x.trim()).filter(x => x && !x.startsWith("#"));
+        if (!ls.length) return -1;
         if (/^\/m3u8\?/.test(ls[0])) { pl = ls[0]; continue; }
         seg = ls[Math.min(1, ls.length - 1)]; break;
       }
     }
-    const t1 = performance.now(); let n = 0;
+    t1 = performance.now();
     try {
-      const r = await fetch(seg, { signal: ctl.signal, cache: "no-store" }); if (!r.ok) throw 0;
+      const r = await fetch(seg, { signal: ctl.signal, cache: "no-store" }); if (!r.ok) return -1;
       const rd = r.body.getReader();
-      while (n < 1572864) { const { done, value } = await rd.read(); if (done) break; n += value.length; }
+      while (n < cap) { const { done, value } = await rd.read(); if (done) break; n += value.length; }
       rd.cancel().catch(() => { });
     } catch (e) {
-      if (ctl.signal.aborted && n > 65536) return { bps: n / ((performance.now() - t1) / 1000), ttfb: 0 };
-      if (!NATIVE_HLS() || ctl.signal.aborted) throw e; // 读不了（多半是跨域），原生 HLS 还能播：只看首包时间
-      await fetch(seg, { mode: "no-cors", signal: ctl.signal, cache: "no-store" });
-      return { bps: 0, ttfb: performance.now() - t1 };
+      if (ctl.signal.aborted) return n > 16384 ? n / ((performance.now() - t1) / 1000) : (t1 ? 1 : -1); // 超时：有数据按实际速度，否则算很慢
+      if (!NATIVE_HLS()) return -1;
+      // 读不了内容（多半是跨域），iPhone 原生播放器仍能播：只看首包时间，折成一个保守的速度
+      const t2 = performance.now(); await fetch(seg, { mode: "no-cors", signal: ctl.signal, cache: "no-store" });
+      return Math.max(2048, 400 * 1024 * 300 / Math.max(300, performance.now() - t2));
     }
-    if (n < 4096) throw 0;
-    return { bps: n / Math.max(.05, (performance.now() - t1) / 1000), ttfb: t1 - t0 };
-  } catch (e) { return null; } finally { clearTimeout(timer); }
+    if (n < 4096) return -1;
+    return n / Math.max(.05, (performance.now() - t1) / 1000);
+  } catch (e) { return ctl.signal.aborted && t1 ? 1 : -1; } finally { clearTimeout(timer); }
 }
 const fmtBps = b => !b ? "" : b >= 1048576 ? (b / 1048576).toFixed(1) + " MB/s" : Math.round(b / 1024) + " KB/s";
 
@@ -324,8 +327,8 @@ class Player {
   async resolve() {
     const q = `/api/resolve?name=${enc(this.meta.title)}&year=${enc(this.meta.year || "")}`;
     const d = await J(q).catch(() => ({ sources: [] })); if (!this.alive()) return;
-    PROXIED = REMOTE && !!d.geo && d.geo !== "CN" && d.geo !== "XX"; this.merge(d.sources); this.resolved = true; this.status();
-    if (!d.done) J(q + "&full=1").then(f => { if (this.alive()) { this.merge(f.sources); this.status(); this.fillPres(); } }).catch(() => { }); else this.fillPres();
+    PROXIED = REMOTE && !!d.geo && d.geo !== "CN" && d.geo !== "XX"; this.merge(d.sources); this.resolved = true; this.status(); this.probe();
+    if (!d.done) J(q + "&full=1").then(f => { if (this.alive()) { this.merge(f.sources); this.status(); this.fillPres(); if (this._pq) this.probe(); } }).catch(() => { }); else this.fillPres();
   }
   async fillPres() { // 解析时没来得及探完的分辨率，后台再补一次（服务端读分片 SPS）
     const ep1 = s => { const u = s.groups[0]?.eps[0]?.url || ""; return /\.m3u8/i.test(u) ? u : ""; };
@@ -407,16 +410,40 @@ class Player {
       if (nm) { const k = this.eps().findIndex(e => e.name === nm); if (k >= 0) { this.play(k, at); return; } } }
     this.play(Math.min(ei, Math.max(0, this.eps().length - 1)), at);
   }
-  // 自动选择：并发测速（最多 8 条），按下载速度排名，选最快的
+  // 后台测速：进入详情页、拿到片源就开始，3 路并发，每条拉 512KB；不通的最后再复测一次
+  probe(again) {
+    if (again) { this.spd.clear(); this._pq = null; }
+    const q = this._pq = this._pq || { list: [], seen: new Set(), retry: new Set(), run: 0 };
+    for (const s of this.sources) if (!q.seen.has(s.api) && s.groups[0].eps[0]) { q.seen.add(s.api); q.list.push(s); }
+    const fire = () => { if ($(".sheet.on")) this.sheet(); };
+    const worker = async () => {
+      q.run++;
+      while (q.list.length && this.alive()) {
+        const s = q.list.shift(), v = await speedTest(s.groups[0].eps[0].url, 8000, 524288);
+        if (!this.alive() || this._pq !== q) return;
+        if (v < 0 && !q.retry.has(s.api)) { q.retry.add(s.api); q.list.push(s); if (!this.spd.has(s.api)) this.spd.set(s.api, -1); }
+        else this.spd.set(s.api, v);
+        fire();
+      }
+      q.run--;
+    };
+    while (q.run < 3 && q.list.length) worker();
+  }
+  probing() { return this._pq && (this._pq.run > 0 || this._pq.list.length > 0); }
+  // 点播放时：用后台测速结果选最快；还没测完就最多再等一会儿（有 2 条以上测通且等了 1.5 秒就开）
   async pickFastest(ei, epName) {
-    this.ensurePlayer(); this.mask("正在测速，选最快的线路…");
-    const epOf = s => (epName && s.groups[0].eps.find(e => e.name === epName)) || s.groups[0].eps[ei];
-    const cand = this.sources.filter((s, k) => !this.bad.has(k) && epOf(s)).slice(0, 8);
-    const res = await Promise.all(cand.map(s => speedTest(epOf(s).url, 4500)));
+    this.ensurePlayer(); this.mask("正在选最快的线路…");
+    if (!this._pq) this.probe();
+    const t0 = Date.now();
+    await new Promise(r => { const chk = () => {
+      const good = [...this.spd.values()].filter(v => v > 1).length, dt = Date.now() - t0;
+      if (!this.alive() || !this.probing() || dt > 6000 || (good >= 2 && dt > 1500) || (good >= 1 && dt > 3500)) return r();
+      setTimeout(chk, 200); }; chk(); });
     if (!this.alive()) return;
-    cand.forEach((s, i) => this.spd.set(s.api, res[i] ? res[i].bps || 1e5 / Math.max(50, res[i].ttfb) : -1));
+    const k = this.sources.findIndex(s => s.groups[0].eps.some((e, i) => epName ? e.name === epName : i === ei));
+    if (k < 0) return;
+    if (!epName) this.ei = ei;
     const best = this.rank()[0]; if (best != null) this.si = best;
-    if ($(".sheet.on")) this.sheet();
   }
   rank(skip) { // 可用线路按测速排序：测过且通的按速度，没测的随后（保持原顺序），测过不通的最后
     const sc = s => { const v = this.spd.get(s.api); return v == null ? 0 : v < 0 ? -1 : 1 + v; };
@@ -520,7 +547,8 @@ class Player {
   showInfo() {
     const el = $("#pinfo"), v = $("#pv"); if (!el || !v) return;
     const lab = h => !h ? "" : h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P";
-    const h = v.videoHeight, lv = this.hls && this.hls.levels || [], mx = Math.max(0, ...lv.map(l => l.height || 0));
+    // 宽银幕片（如 1920×800）按宽度折算，与预探口径一致：max(高, 宽×9/16)
+    const eq = (w, hh) => Math.round(Math.max(hh || 0, (w || 0) * 9 / 16)); const h = eq(v.videoWidth, v.videoHeight), lv = this.hls && this.hls.levels || [], mx = Math.max(0, ...lv.map(l => eq(l.width, l.height)));
     const res = h ? (mx > h + 40 ? `${lab(h)}（最高 ${lab(mx)}）` : lab(h)) : "";
     const spd = fmtBps(this._bw);
     el.innerHTML = `<i class="${this._relay ? "rl" : "dr"}"></i>${this._relay ? "中转" : "直连"}${res ? `<em class="${h && h < 700 ? "low" : ""}" title="片源视频本身的分辨率">${res}</em>` : ""}${spd ? `<em class="spd">${spd}</em>` : ""}`;
@@ -537,10 +565,10 @@ class Player {
     let bg = $(".sheet-bg"); if (!bg) { document.body.insertAdjacentHTML("beforeend", `<div class="sheet-bg"></div><div class="sheet"></div>`); bg = $(".sheet-bg"); }
     const sh = $(".sheet");
     const close = () => { bg.classList.remove("on"); sh.classList.remove("on"); };
-    sh.innerHTML = `<div class="grab"></div><h4>选择线路</h4><div class="srow auto${this.auto ? " on" : ""}" data-i="-1"><span>自动选择</span><small>测速选最快，直连不通或卡顿自动换源</small></div>${this.sources.map((s, i) => `<div class="srow${!this.auto && i === this.si ? " on" : i === this.si ? " cur" : ""}${this.bad.has(i) ? " bad" : ""}" data-i="${i}"><span>${esc(s.site)}</span><small>${s.groups[0].eps.length > 1 ? s.groups[0].eps.length + " 集" : ""} ${esc(s.remarks || "")}</small><span class="sp"></span>${s.pres || s.res ? `<small>${(h => h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P")(s.pres || s.res)}</small>` : ""}<small>${(v => v == null ? "" : v < 0 ? "不通" : v > 2000 ? fmtBps(v) : "可连")(this.spd.get(s.api))}</small></div>`).join("")}
+    sh.innerHTML = `<div class="grab"></div><h4>选择线路</h4><div class="srow auto${this.auto ? " on" : ""}" data-i="-1"><span>自动选择</span><small>测速选最快，直连不通或卡顿自动换源</small></div>${this.sources.map((s, i) => `<div class="srow${!this.auto && i === this.si ? " on" : i === this.si ? " cur" : ""}${this.bad.has(i) ? " bad" : ""}" data-i="${i}"><span>${esc(s.site)}</span><small>${s.groups[0].eps.length > 1 ? s.groups[0].eps.length + " 集" : ""} ${esc(s.remarks || "")}</small><span class="sp"></span>${s.pres || s.res ? `<small>${(h => h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P")(s.pres || s.res)}</small>` : ""}<small>${(v => v == null ? (this.probing() ? "测速中" : "") : v < 0 ? "不通" : v <= 1 ? "很慢" : fmtBps(v))(this.spd.get(s.api))}</small></div>`).join("")}
       <label class="switch"><span>自动去除插播广告</span><input type="checkbox" id="noad" ${localStorage.noad === "0" ? "" : "checked"}></label>`;
     $$(".srow", sh).forEach(r => r.onclick = async () => { const i = +r.dataset.i, at = $("#pv").currentTime, name = this.eps()[this.ei]?.name; close(); this.stuck = false;
-      if (i < 0) { this.auto = true; this.bad.clear(); this.rbad.clear(); this.spd.clear(); this.cleanup(); await this.pickFastest(this.ei, name); if (!this.alive()) return; }
+      if (i < 0) { this.auto = true; this.bad.clear(); this.rbad.clear(); this.spd.clear(); this.cleanup(); this.probe(true); await this.pickFastest(this.ei, name); if (!this.alive()) return; }
       else { this.auto = false; this.bad.delete(i); this.rbad.delete(i); this.si = i; }
       const k = this.eps().findIndex(e => e.name === name); this.play(k >= 0 ? k : Math.min(this.ei, this.eps().length - 1), at); });
     $("#noad", sh).onchange = e => { localStorage.noad = e.target.checked ? "1" : "0"; close(); this.play(this.ei, $("#pv").currentTime); };
