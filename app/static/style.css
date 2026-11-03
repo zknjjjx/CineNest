@@ -581,5 +581,7 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
   .pwrap,.pbar{max-width:calc((100vh - 112px) * 16 / 9)!important;max-width:calc((100dvh - 112px) * 16 / 9)!important}
   .pbar{padding-top:6px;flex-wrap:nowrap}
   #pslot:has(.pwrap){min-height:calc(100dvh - 48px)}
-  .pbar .pill{padding:4px 10px}
+  .pbar .pill{padding:4px 10px;flex:none}
+  .pbar .pill.ic span{display:none}
+  #psrc,.pbar .pinfo{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
