@@ -478,9 +478,11 @@ class Player {
   }
   showInfo() {
     const el = $("#pinfo"), v = $("#pv"); if (!el || !v) return;
-    const h = v.videoHeight, res = !h ? "" : h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P";
+    const lab = h => !h ? "" : h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P";
+    const h = v.videoHeight, lv = this.hls && this.hls.levels || [], mx = Math.max(0, ...lv.map(l => l.height || 0));
+    const res = h ? (mx > h + 40 ? `${lab(h)}（最高 ${lab(mx)}）` : lab(h)) : "";
     const bw = this._bw, spd = bw ? (bw >= 1048576 ? (bw / 1048576).toFixed(1) + " MB/s" : Math.round(bw / 1024) + " KB/s") : "";
-    el.innerHTML = `<i class="${this._relay ? "rl" : "dr"}"></i>${this._relay ? "中转" : "直连"}${res ? `<em>${res}</em>` : ""}${spd ? `<em class="spd">${spd}</em>` : ""}`;
+    el.innerHTML = `<i class="${this._relay ? "rl" : "dr"}"></i>${this._relay ? "中转" : "直连"}${res ? `<em class="${h && h < 700 ? "low" : ""}" title="片源视频本身的分辨率">${res}</em>` : ""}${spd ? `<em class="spd">${spd}</em>` : ""}`;
   }
   cleanup() { clearInterval(this.infoT); QS.flush(); clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
   save(v, force) {
