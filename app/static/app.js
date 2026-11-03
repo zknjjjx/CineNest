@@ -387,6 +387,18 @@ class Player {
       <div class="eps">${eps.slice(pg * PAGE, (pg + 1) * PAGE).map((e, j) => { const i = pg * PAGE + j; return `<button class="ep${this.started && i === this.ei ? " on" : ""}${seen.has(i) ? " seen" : ""}" data-i="${i}" title="${esc(e.name)}">${esc(e.name)}</button>`; }).join("")}</div>`;
     $$(".epnav .chip", sec).forEach(b => b.onclick = () => { this._pg = +b.dataset.p; this.renderEps(); });
     $$(".ep", sec).forEach(b => b.onclick = () => { this._pg = undefined; this.play(+b.dataset.i, 0); });
+    this.drawer(eps, seen, upd);
+  }
+  drawer(eps, seen, upd) { // 电脑版：播放画面左侧隐藏式选集栏，鼠标移到左边缘滑出，滚轮上下翻
+    const w = $("#pwrap"); if (!w || eps.length < 2) { $("#epdr")?.remove(); return; }
+    let d = $("#epdr");
+    if (!d) { w.insertAdjacentHTML("beforeend", `<div class="epdr" id="epdr"><div class="epdr-hot"></div><div class="epdr-p"><div class="epdr-h"><span>选集</span><small></small></div><div class="epdr-l"></div></div></div>`); d = $("#epdr"); }
+    $(".epdr-h small", d).textContent = upd;
+    const l = $(".epdr-l", d);
+    l.innerHTML = eps.map((e, i) => `<button class="${i === this.ei ? "on" : ""}${seen.has(i) ? " seen" : ""}" data-i="${i}" title="${esc(e.name)}"><span>${esc(e.name)}</span></button>`).join("");
+    $$("button", l).forEach(b => b.onclick = () => { this._pg = undefined; this.play(+b.dataset.i, 0); });
+    const on = $("button.on", l); if (on) l.scrollTop = on.offsetTop - l.clientHeight / 2 + on.offsetHeight / 2;
+    l.onwheel = e => e.stopPropagation();
   }
   async start(h) {
     if (!this.resolved) { this.status(`<i class="lamp wait"></i>正在查找片源…`); toast("正在查找片源，稍等"); await new Promise(r => { const t = setInterval(() => { if (this.resolved || !this.alive()) { clearInterval(t); r(); } }, 200); }); }
