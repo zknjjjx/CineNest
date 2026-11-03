@@ -450,3 +450,10 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
 .tabs-d a:hover span,.tabs-d a.on span{background:linear-gradient(100deg,var(--ac),var(--ac2) 40%,#fff1d6 50%,var(--ac2) 60%,var(--ac));background-size:220% 100%;-webkit-background-clip:text;background-clip:text;animation:shine 4s linear infinite}
 .tabs-d a:hover span{filter:brightness(1.15)}
 .tabs-d a.on{background:rgba(255,90,54,.10);box-shadow:inset 0 0 0 1px rgba(255,140,80,.25)}
+/* v33 慢速交叉淡入淡出 */
+.slide{transition:opacity 1.8s cubic-bezier(.45,0,.25,1)}
+.slide.on{z-index:2}.slide.prev{z-index:1;opacity:1}
+.slide.on .txt>*{animation-duration:1.3s}
+.slide.on .txt>:nth-child(1){animation-delay:.35s}.slide.on .txt>:nth-child(2){animation-delay:.5s}.slide.on .txt>:nth-child(3){animation-delay:.65s}.slide.on .txt>:nth-child(4){animation-delay:.8s}
+.thumbs .th{transition:transform .9s cubic-bezier(.2,.8,.2,1),opacity .9s,box-shadow .9s,margin .9s}
+.thumbs .th.on b{animation:thprog 8s linear both}
