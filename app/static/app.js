@@ -184,10 +184,10 @@ function renderDetail(tok, m, autoplay) {
      <h1>${esc(m.title)}</h1>${m.original ? `<div class="og">${esc(m.original)}</div>` : ""}
      <div class="metas" id="metas">${m.rate ? `<span class="rate">${m.rate}</span>${m.votes ? `<span>${m.votes} 人评分</span>` : ""}` : ""}${m.metas.map(x => `<span>${esc(x)}</span>`).join("")}</div>
      <div class="tags" id="tags">${m.tags.map(t => `<span>${esc(t)}</span>`).join("")}</div>
+     ${m.intro ? `<div class="intro fold" id="intro">${esc(m.intro)}</div><button class="more-t" id="moret">展开</button>` : `<div class="intro" id="intro"></div>`}
         </div>
    <div class="acts" id="acts"><button class="btn pri" id="playbtn">${ICON_PLAY}${h ? `继续播放 ${esc(h.epName || "")}` : "播放"}</button><span class="srcstat" id="sst"><i class="lamp wait"></i>正在查找片源…</span></div>
    <aside class="side">
-   ${m.intro ? `<div class="intro fold" id="intro">${esc(m.intro)}</div><button class="more-t" id="moret">展开</button>` : `<div class="intro" id="intro"></div>`}
    ${m.cast.length ? `<div class="sec-h">演职员</div><div class="cast">${m.cast.map((c, i) => `<div style="--i:${i}"><div class="av">${c.avatar ? img(c.avatar, c.name) : esc((c.name || "?")[0])}</div><p><b>${esc(c.name)}</b><span>${esc(c.role)}</span></p></div>`).join("")}</div>` : `<div id="castslot"></div>`}
    </aside></div>
    <div id="epsec"></div>

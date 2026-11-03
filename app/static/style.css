@@ -467,3 +467,18 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
 #psrc{color:var(--sub)}
 @media (max-width:760px){.pinfo{font-size:11px;flex:none}.pinfo .spd{display:none}}
 .pinfo em.low{color:#c9925a}
+/* v38 详情：剧情在左（标题下），右侧只放演职员，头像加大 */
+.dt-top .info{align-self:start}
+.dt-top .info .intro{margin:14px 0 0;font-size:15px;line-height:1.85;color:#cdd1d8;max-width:none}
+.dt-top .info .intro:empty{display:none}
+.dt-top .info .intro.fold{-webkit-line-clamp:4}
+.dt-top .info .more-t{padding:0;margin-top:4px;font-size:13.5px}
+.dt-top .side{max-height:360px}
+.side:has(#castslot:empty){display:none}
+.side .sec-h{margin:0 0 14px}
+.side .cast{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 18px;padding-right:4px}
+.side .cast .av{width:58px;height:58px;font-size:20px;box-shadow:0 0 0 2px rgba(255,140,80,.25),0 6px 14px rgba(0,0,0,.35)}
+.side .cast b{font-size:15px}.side .cast span{font-size:12.5px}
+.side .cast>div{gap:12px}
+@media (max-width:1100px){.side .cast{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));max-height:240px}}
+@media (max-width:760px){.dt-top .info .intro{font-size:14px}.dt-top .info .intro.fold{-webkit-line-clamp:3}.side .cast{grid-template-columns:repeat(2,minmax(0,1fr))}.side .cast .av{width:48px;height:48px}.side .cast b{font-size:14px}}
