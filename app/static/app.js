@@ -91,6 +91,7 @@ const CHIPS = [
   [["tv", "show", "show", "综合"], ["tv", "show", "show_domestic", "国内"], ["tv", "show", "show_foreign", "国外"], ["tv", "rec", "综艺,真人秀", "真人秀"], ["tv", "rec", "综艺,脱口秀", "脱口秀"], ["tv", "rec", "综艺,音乐", "音乐"]],
 ];
 const chipGroup = (kind, cat, type) => CHIPS.find(g => g.some(c => c[0] === kind && c[1] === cat && c[2] === type)) || CHIPS[kind === "tv" ? 1 : 0];
+const setNav = k => $$(".tabs-d a,.tabs-m a").forEach(a => a.classList.toggle("on", a.dataset.k === k));
 const navKey = (kind, cat, type) => ["movie", "tv", "anime", "show"][CHIPS.indexOf(chipGroup(kind, cat, type))];
 async function more(tok, kind, cat, type, title) {
   const chips = chipGroup(kind, cat, type), gname = ["电影", "剧集", "动漫", "综艺"][CHIPS.indexOf(chips)];
@@ -153,6 +154,7 @@ async function detailDouban(tok, type, id, autoplay) {
   app.innerHTML = `<div class="loading"><div class="spin"></div></div>`;
   const d = await J(`/api/db/detail?type=${type}&id=${id}`); if (tok !== routeToken) return;
   if (d.error) { app.innerHTML = `<div class="empty">豆瓣详情获取失败</div>`; return; }
+  { const g = (d.genres || []).join(","), tv = type === "tv" || d.episodes > 1; setNav(/动画/.test(g) ? "anime" : tv && /真人秀|脱口秀/.test(g) ? "show" : tv ? "tv" : "movie"); }
   renderDetail(tok, {
     title: d.title, year: d.year, pic: d.pic, rate: d.rate, votes: d.votes, original: d.original !== d.title ? d.original : "",
     metas: [d.year, d.countries.join(" / "), d.durations[0], d.episodes ? `${d.episodes} 集` : ""].filter(Boolean),
@@ -385,7 +387,7 @@ class Player {
   ensurePlayer() {
     if ($("#pwrap")) return $("#pv");
     $("#pslot").innerHTML = `<div class="pwrap" id="pwrap"><video id="pv" controls playsinline webkit-playsinline x5-playsinline x5-video-player-type="h5-page" x-webkit-airplay="allow" preload="auto"></video><button class="rfs-x" id="rfsx" aria-label="退出全屏"><svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="pmask" id="pmask"><div class="spin"></div><span id="pmt">加载中…</span></div></div>
-      <div class="pbar"><span class="now" id="pnow"></span><span id="psrc"></span><span class="sp"></span><button class="pill" id="pprev">上一集</button><button class="pill" id="pnext">下一集</button><button class="pill" id="pswitch">换源</button><button class="pill ic" id="ppip" title="悬浮播放"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11h7v6h-7z"/></svg><span>悬浮</span></button><button class="pill ic" id="pfs" title="全屏"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>全屏</span></button></div>`;
+      <div class="pbar"><span class="now" id="pnow"></span><span id="psrc"></span><span class="pinfo" id="pinfo"></span><span class="sp"></span><button class="pill" id="pprev">上一集</button><button class="pill" id="pnext">下一集</button><button class="pill" id="pswitch">换源</button><button class="pill ic" id="ppip" title="悬浮播放"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11h7v6h-7z"/></svg><span>悬浮</span></button><button class="pill ic" id="pfs" title="全屏"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>全屏</span></button></div>`;
     $("#pprev").onclick = () => this.ei > 0 && this.play(this.ei - 1, 0);
     $("#pnext").onclick = () => this.ei + 1 < this.eps().length && this.play(this.ei + 1, 0);
     $("#pswitch").onclick = () => this.sheet();
@@ -414,7 +416,7 @@ class Player {
     if (!keepMode) this.proxy = REMOTE && (PROXIED ? (src.lock === 0 ? false : (!!Relay.get(src.api) || !!geoLocked(src))) : !!Relay.get(src.api)); // 记住了“直连不通”的站点，直接走中转
     this.cleanup();
     $("#pnow").textContent = eps.length > 1 ? ep.name : "正片";
-    $("#psrc").textContent = `· ${src.site}${this.proxy ? "（中转）" : ""}`;
+    $("#psrc").textContent = `· ${src.site}`;
     $("#pprev").style.display = $("#pnext").style.display = eps.length > 1 ? "" : "none";
     this.mask(`正在连接 ${src.site}…`); this.renderEps();
     const mixed = !REMOTE || /^http:\/\//i.test(ep.url); // 局域网访问时一律经 N1 中转（家里设备走代理会被片源 CDN 拒绝）；https 页面里的 http 资源也必须中转
@@ -423,6 +425,7 @@ class Player {
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };
     this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, REMOTE ? 25000 : 15000);
     QS.begin(src.api, this.proxy || mixed);
+    this._relay = this.proxy || mixed; this._bw = 0; this.showInfo(); this.infoT = setInterval(() => this.showInfo(), 1500);
     const onPlaying = () => { QS.playing(); if (!ok && !this.proxy) learn(src.api, true); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
     v.onplaying = onPlaying;
     v.onwaiting = () => { if (!ok) return; if (!v.seeking) QS.waiting(); this.mask("缓冲中…"); clearTimeout(this.stall); this.stall = setTimeout(() => fail("卡顿太久"), REMOTE ? 30000 : 20000); };
@@ -444,6 +447,7 @@ class Player {
         fail(d.details || "播放错误");
       });
       hls.on(Hls.Events.MANIFEST_PARSED, begin);
+      hls.on(Hls.Events.FRAG_LOADED, (e, d) => { const st = d.frag && d.frag.stats || d.stats; if (!st) return; const ms = (st.loading ? st.loading.end - st.loading.start : st.tload - st.trequest) || 0, b = st.loaded || st.total || 0; if (ms > 30 && b > 20000) { const r = b / ms * 1000; this._bw = this._bw ? this._bw * .6 + r * .4 : r; } });
       hls.loadSource(url); hls.attachMedia(v);
       const p0 = v.play(); if (p0 && p0.catch) p0.catch(() => { });
     } else { v.src = url; v.onloadedmetadata = begin; v.onerror = () => fail("播放错误"); v.load(); const p0 = v.play(); if (p0 && p0.catch) p0.catch(() => { }); }
@@ -472,7 +476,13 @@ class Player {
     if (nx >= 0) { const r = REMOTE && !!Relay.get(this.sources[nx].api); toast(`${cur.site} ${why}，已切到 ${this.sources[nx].site}`); go(nx, r); return; }
     this.cleanup(); this.mask("所有线路都无法播放，稍后再试"); this.status(); toast("所有线路都无法播放");
   }
-  cleanup() { QS.flush(); clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
+  showInfo() {
+    const el = $("#pinfo"), v = $("#pv"); if (!el || !v) return;
+    const h = v.videoHeight, res = !h ? "" : h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P";
+    const bw = this._bw, spd = bw ? (bw >= 1048576 ? (bw / 1048576).toFixed(1) + " MB/s" : Math.round(bw / 1024) + " KB/s") : "";
+    el.innerHTML = `<i class="${this._relay ? "rl" : "dr"}"></i>${this._relay ? "中转" : "直连"}${res ? `<em>${res}</em>` : ""}${spd ? `<em class="spd">${spd}</em>` : ""}`;
+  }
+  cleanup() { clearInterval(this.infoT); QS.flush(); clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
   save(v, force) {
     const now = Date.now(); if (!force && now - (this._sv || 0) < 4000) return; this._sv = now;
     const old = H.get(this.key) || {}; const seen = new Set(old.seen || []); seen.add(this.ei);
@@ -508,7 +518,8 @@ function route() {
   const p = h.split("/").map(x => { try { return decodeURIComponent(x); } catch (e) { return x; } });
   let k = "home";
   if (p[1] === "more") k = navKey(p[2], p[3], p[4]);
-  else if (p[1] && p[1] !== "d" && p[1] !== "v") k = p[1];
+  else if (p[1] === "d") k = p[2] === "tv" ? "tv" : "movie";
+  else if (p[1] && p[1] !== "v") k = p[1];
   $$(".tabs-d a,.tabs-m a").forEach(a => a.classList.toggle("on", a.dataset.k === k));
   $(".top").classList.toggle("sub", h !== "/" && h !== "");
   if (p[1] !== "search") $("#q").value = "";
