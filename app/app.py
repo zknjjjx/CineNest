@@ -702,6 +702,7 @@ def _num(v, lo, hi):
 
 
 async def api_learn(req):
+    return web.json_response({"ok": False, "disabled": True})  # v44 起取消自动学习：前端改为实时测速选源
     bucket = _bucket(client_geo(req))
     try:
         b = await req.json() if req.content_type == "application/json" else json.loads(await req.text())
@@ -757,6 +758,7 @@ async def api_learned(req):
 
 
 def with_learn(srcs, geo):
+    return srcs  # v44 起取消自动学习
     bucket = _bucket(geo)
     if not bucket:
         return [dict(s, res=learn_res(s["api"])) for s in srcs]

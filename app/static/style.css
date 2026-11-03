@@ -594,3 +594,10 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
   .pbar .sp{flex:1 1 0;min-width:0}
   .pbar .pill{font-size:13px;padding:4px 9px}
 }
+/* v44 换源面板：自动选择行 */
+.srow.auto{background:linear-gradient(90deg,rgba(255,90,54,.10),rgba(255,181,71,.06));border:1px solid rgba(255,140,80,.18)}
+.srow.auto span{font-weight:700}
+.srow.auto.on{background:linear-gradient(90deg,rgba(255,90,54,.22),rgba(255,181,71,.12));color:#ffb06a}
+.srow.cur{box-shadow:inset 3px 0 0 var(--ac2)}
+.srow small{white-space:nowrap}
+.srow.auto small{white-space:normal}
