@@ -482,3 +482,37 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
 .side .cast>div{gap:12px}
 @media (max-width:1100px){.side .cast{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));max-height:240px}}
 @media (max-width:760px){.dt-top .info .intro{font-size:14px}.dt-top .info .intro.fold{-webkit-line-clamp:3}.side .cast{grid-template-columns:repeat(2,minmax(0,1fr))}.side .cast .av{width:48px;height:48px}.side .cast b{font-size:14px}}
+
+/* v39 电脑播放器：画面填满一屏，下方标题滚动才出现 */
+@media (min-width:761px){
+  .pwrap,.pbar{max-width:calc((100vh - 172px) * 16 / 9)}
+  #pslot:has(.pwrap){min-height:calc(100vh - 96px);min-height:calc(100dvh - 96px)}
+}
+
+/* v39 手机首页轮播：海报在上、文字在下，按钮一行 */
+@media (max-width:760px){
+  .hero{aspect-ratio:auto;height:min(118vw,70vh);max-height:none}
+  .slide{align-items:flex-end}
+  .slide .pp{display:block;left:50%;right:auto;top:6%;transform:translateX(-50%);height:54%;border-radius:14px}
+  .slide .shade{background:linear-gradient(0deg,rgba(11,12,16,.98) 14%,rgba(11,12,16,.55) 42%,rgba(11,12,16,.05) 66%)}
+  .slide .txt{max-width:100%!important;width:100%;padding:0 18px 40px!important;text-align:center;align-self:flex-end}
+  .slide h2{font-size:24px;-webkit-line-clamp:1;margin-bottom:6px}
+  .slide .m{justify-content:center;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;font-size:13px;margin-bottom:14px}
+  .slide .m span:not(.rate){overflow:hidden;text-overflow:ellipsis}
+  .slide .acts{justify-content:center!important;flex-wrap:nowrap;gap:10px}
+  .slide .btn{padding:9px 20px;font-size:14px;white-space:nowrap}
+  .slide .btn svg{width:15px;height:15px}
+  .hero .dots{bottom:14px}
+}
+
+/* v39 手机底栏：与电脑版导航同款橙金字、点亮光晕 */
+@media (max-width:760px){
+  .tabs-m{background:linear-gradient(180deg,rgba(18,19,25,.82),rgba(11,12,16,.95));border-top:1px solid rgba(255,140,80,.14);box-shadow:0 -10px 30px rgba(0,0,0,.35)}
+  .tabs-m a{position:relative;gap:3px;font-size:11.5px;font-weight:600;letter-spacing:.5px;color:rgba(255,200,160,.55);font-family:Inter,"PingFang SC","Noto Sans SC",sans-serif}
+  .tabs-m a span{background:linear-gradient(100deg,#ffd9bf,#ffbf94);-webkit-background-clip:text;background-clip:text;color:transparent;opacity:.7;transition:opacity .4s}
+  .tabs-m a svg.st{stroke-width:1.6}
+  .tabs-m a.on{color:var(--ac)}
+  .tabs-m a.on span{opacity:1;background:linear-gradient(100deg,var(--ac),var(--ac2) 40%,#fff1d6 50%,var(--ac2) 60%,var(--ac));background-size:220% 100%;-webkit-background-clip:text;background-clip:text;animation:shine 4s linear infinite}
+  .tabs-m a::before{content:"";position:absolute;top:-6px;left:28%;right:28%;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,#ffd08a,transparent);box-shadow:0 0 10px #ff9a5a;transform:scaleX(0);transition:transform .6s cubic-bezier(.2,.8,.2,1)}
+  .tabs-m a.on::before{transform:scaleX(1)}
+}

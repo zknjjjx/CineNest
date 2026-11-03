@@ -323,7 +323,17 @@ class Player {
     const q = `/api/resolve?name=${enc(this.meta.title)}&year=${enc(this.meta.year || "")}`;
     const d = await J(q).catch(() => ({ sources: [] })); if (!this.alive()) return;
     PROXIED = REMOTE && !!d.geo && d.geo !== "CN" && d.geo !== "XX"; this.merge(d.sources); this.resolved = true; this.status();
-    if (!d.done) J(q + "&full=1").then(f => { if (this.alive()) { this.merge(f.sources); this.status(); } }).catch(() => { });
+    if (!d.done) J(q + "&full=1").then(f => { if (this.alive()) { this.merge(f.sources); this.status(); this.fillPres(); } }).catch(() => { }); else this.fillPres();
+  }
+  async fillPres() { // 解析时没来得及探完的分辨率，后台再补一次（服务端读分片 SPS）
+    const ep1 = s => { const u = s.groups[0]?.eps[0]?.url || ""; return /\.m3u8/i.test(u) ? u : ""; };
+    const urls = this.sources.filter(s => !s.pres && ep1(s)).map(ep1); if (!urls.length) return;
+    const r = await J("/api/pres", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ urls }) }).catch(() => ({}));
+    if (!this.alive()) return; let n = 0;
+    for (const s of this.sources) { const h = r[ep1(s)]; if (h && !s.pres) { s.pres = h; n++; } }
+    if (!n) return;
+    if (!this.started) this.merge([]);
+    if ($(".sheet.on")) this.sheet();
   }
   merge(list) {
     const have = new Set(this.sources.map(s => s.api));

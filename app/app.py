@@ -763,42 +763,96 @@ def with_learn(srcs, geo):
     return [dict(s, res=learn_res(s["api"]), q=learn_quality(bucket, s["api"]), **({"lock": learn_verdict(s["api"])} if bucket == "px" else {})) for s in srcs]
 
 
-# ---------------- 预探分辨率：读第一集 m3u8 主列表里的 RESOLUTION（N1 走国内出口，几百字节，缓存 6 小时） ----------------
-_probe = {}
+# ---------------- 预探分辨率：先读 m3u8 主列表 RESOLUTION；没有就取第一个分片读 SPS（含 AES-128 解密），后台跑，缓存 6 小时 ----------------
+from vprobe import aes_cbc_dec, ts_res
+_probe = {}      # url -> (时间, 高度或 None)
+_pending = {}    # url -> Task
 
 
-async def probe_res(session, url):
-    c = _probe.get(url)
-    if c and time.time() - c[0] < 21600:
-        return c[1]
+def _eq_h(w, h):
+    """把宽高折算成“几 P”：竖屏取短边，宽银幕按宽度折算"""
+    return max(min(w, h), round(max(w, h) * 9 / 16))
+
+
+async def _deep_probe(session, url):
+    to = aiohttp.ClientTimeout(total=8)
+    async def get(u, n):
+        async with session.get(u, headers={"User-Agent": UA}, timeout=to, ssl=False) as r:
+            if r.status != 200:
+                raise ValueError(r.status)
+            return await r.content.read(n)
+    t = (await get(url, 65536)).decode("utf-8", "ignore")
+    for _ in range(2):
+        if "#EXT-X-STREAM-INF" not in t:
+            break
+        rs = [_eq_h(int(w), int(h)) for w, h in re.findall(r"RESOLUTION=(\d+)x(\d+)", t)]
+        if rs:
+            return max(rs)
+        v = [l.strip() for l in t.splitlines() if l.strip() and not l.startswith("#")]
+        url = urljoin(url, v[-1])
+        t = (await get(url, 262144)).decode("utf-8", "ignore")
+    segs = [l.strip() for l in t.splitlines() if l.strip() and not l.startswith("#")]
+    if not segs:
+        return None
+    seq = int((re.search(r"MEDIA-SEQUENCE:(\d+)", t) or [0, 0])[1])
+    d = await get(urljoin(url, segs[0]), 49152)
+    km = re.search(r'#EXT-X-KEY:METHOD=AES-128,URI="([^"]+)"(?:,IV=0x([0-9a-fA-F]+))?', t)
+    if km:
+        key = (await get(urljoin(url, km[1]), 64))[:16]
+        iv = bytes.fromhex(km[2].zfill(32)[-32:]) if km[2] else seq.to_bytes(16, "big")
+        d = await asyncio.get_running_loop().run_in_executor(None, aes_cbc_dec, key, iv, d[:16384])
+    r = ts_res(d)
+    return _eq_h(*r) if r and r[0] > 0 and r[1] > 0 else None
+
+
+async def _probe_job(session, url):
     h = None
     try:
-        async with session.get(url, headers={"User-Agent": UA}, timeout=aiohttp.ClientTimeout(total=2.5)) as r:
-            if r.status == 200:
-                t = (await r.content.read(8192)).decode("utf-8", "ignore")
-                hs = [int(m) for m in re.findall(r"RESOLUTION=\d+x(\d+)", t)]
-                h = max(hs) if hs else None
+        h = await asyncio.wait_for(_deep_probe(session, url), 15)
     except Exception:
         pass
-    _probe[url] = (time.time(), h)
+    _probe[url] = (time.time() if h else time.time() - 21600 + 1800, h)  # 失败 30 分钟后可重试
+    _pending.pop(url, None)
     if len(_probe) > 3000:
         for k in sorted(_probe, key=lambda k: _probe[k][0])[:1000]:
             _probe.pop(k, None)
-    return h
+
+
+def probe_start(session, url):
+    c = _probe.get(url)
+    if c and time.time() - c[0] < 21600:
+        return None
+    if url not in _pending:
+        _pending[url] = asyncio.ensure_future(_probe_job(session, url))
+    return _pending[url]
+
+
+def _ep1(s):
+    try:
+        u = s["groups"][0]["eps"][0]["url"]
+        return u if re.search(r"\.m3u8", u, re.I) else None
+    except Exception:
+        return None
 
 
 async def with_probe(session, srcs):
-    def ep1(s):
-        try:
-            u = s["groups"][0]["eps"][0]["url"]
-            return u if re.search(r"\.m3u8", u, re.I) else None
-        except Exception:
-            return None
-    urls = [ep1(s) for s in srcs]
-    jobs = [probe_res(session, u) for u in urls if u]
+    urls = [_ep1(s) for s in srcs]
+    jobs = [j for j in (probe_start(session, u) for u in urls if u) if j]
     if jobs:
-        await asyncio.wait([asyncio.ensure_future(j) for j in jobs], timeout=1.5)
+        await asyncio.wait(jobs, timeout=1.5)
     return [dict(s, pres=_probe.get(u, (0, None))[1]) if u else s for s, u in zip(srcs, urls)]
+
+
+async def api_pres(req):
+    """前端补问：解析时没探完的片源，最多再等 6 秒；只认 resolve 登记过的地址"""
+    try:
+        urls = [u for u in (await req.json()).get("urls", [])[:40] if isinstance(u, str)]
+    except Exception:
+        urls = []
+    jobs = [_pending[u] for u in urls if u in _pending]
+    if jobs:
+        await asyncio.wait(jobs, timeout=6)
+    return web.json_response({u: _probe[u][1] for u in urls if u in _probe and _probe[u][1]})
 
 
 async def api_resolve(req):
@@ -952,6 +1006,7 @@ app.router.add_get("/api/db/related", api_db_related)
 app.router.add_get("/api/resolve", api_resolve)
 app.router.add_post("/api/learn", api_learn)
 app.router.add_get("/api/learned", api_learned)
+app.router.add_post("/api/pres", api_pres)
 app.router.add_static("/static", STATIC)
 
 if __name__ == "__main__":
