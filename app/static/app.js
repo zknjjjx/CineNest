@@ -328,7 +328,7 @@ class Player {
   merge(list) {
     const have = new Set(this.sources.map(s => s.api));
     const cur = this.sources[this.si];
-    for (const s of list || []) if (!have.has(s.api)) this.sources.push(s);
+    for (const s of list || []) if (!have.has(s.api)) this.sources.push(s); else { const o = this.sources.find(x => x.api === s.api); if (o && s.pres && !o.pres) o.pres = s.pres; }
     if (!this.started) { // 还没开播时按后端顺序（集数全 + 最快）
       const order = new Map((list || []).map((s, i) => [s.api, i]));
       this.sources.sort((a, b) => (order.get(a.api) ?? 99) - (order.get(b.api) ?? 99));
@@ -338,7 +338,7 @@ class Player {
       {
         const maxE = Math.max(0, ...this.sources.map(s => s.groups[0].eps.length));
         const late = s => !REMOTE || !PROXIED ? 0 : s.lock === 0 ? 0 : (geoLocked(s) || (Relay.get(s.api) ? 1 : 0));
-        const tier = s => !s.res ? 1 : s.res >= 1000 ? 0 : s.res >= 700 ? 1 : 2;
+        const tier = s => { const h = s.pres || s.res; return !h ? 1 : h >= 1000 ? 0 : h >= 700 ? 1 : 2; }; // 先看预探到的本片分辨率，没有再用学到的片源平均
         const key = s => [late(s), s.groups[0].eps.length < maxE ? 1 : 0, tier(s), REMOTE ? s.q ?? 5 : 0];
         this.sources.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3]; });
       }
@@ -500,7 +500,7 @@ class Player {
     let bg = $(".sheet-bg"); if (!bg) { document.body.insertAdjacentHTML("beforeend", `<div class="sheet-bg"></div><div class="sheet"></div>`); bg = $(".sheet-bg"); }
     const sh = $(".sheet");
     const close = () => { bg.classList.remove("on"); sh.classList.remove("on"); };
-    sh.innerHTML = `<div class="grab"></div><h4>选择线路</h4>${this.sources.map((s, i) => `<div class="srow${i === this.si ? " on" : ""}${this.bad.has(i) ? " bad" : ""}" data-i="${i}"><span>${esc(s.site)}</span><small>${s.groups[0].eps.length > 1 ? s.groups[0].eps.length + " 集" : ""} ${esc(s.remarks || "")}</small><span class="sp"></span><small>${s.ms}ms</small></div>`).join("")}
+    sh.innerHTML = `<div class="grab"></div><h4>选择线路</h4>${this.sources.map((s, i) => `<div class="srow${i === this.si ? " on" : ""}${this.bad.has(i) ? " bad" : ""}" data-i="${i}"><span>${esc(s.site)}</span><small>${s.groups[0].eps.length > 1 ? s.groups[0].eps.length + " 集" : ""} ${esc(s.remarks || "")}</small><span class="sp"></span>${s.pres || s.res ? `<small>${(h => h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P")(s.pres || s.res)}</small>` : ""}<small>${s.ms}ms</small></div>`).join("")}
       <label class="switch"><span>自动去除插播广告</span><input type="checkbox" id="noad" ${localStorage.noad === "0" ? "" : "checked"}></label>`;
     $$(".srow", sh).forEach(r => r.onclick = () => { const i = +r.dataset.i; this.bad.delete(i); this.dbad.delete(i); const at = $("#pv").currentTime; this.si = i; close(); this.play(Math.min(this.ei, this.eps().length - 1), at); });
     $("#noad", sh).onchange = e => { localStorage.noad = e.target.checked ? "1" : "0"; close(); this.play(this.ei, $("#pv").currentTime); };

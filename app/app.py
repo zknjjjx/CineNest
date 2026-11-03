@@ -763,6 +763,44 @@ def with_learn(srcs, geo):
     return [dict(s, res=learn_res(s["api"]), q=learn_quality(bucket, s["api"]), **({"lock": learn_verdict(s["api"])} if bucket == "px" else {})) for s in srcs]
 
 
+# ---------------- 预探分辨率：读第一集 m3u8 主列表里的 RESOLUTION（N1 走国内出口，几百字节，缓存 6 小时） ----------------
+_probe = {}
+
+
+async def probe_res(session, url):
+    c = _probe.get(url)
+    if c and time.time() - c[0] < 21600:
+        return c[1]
+    h = None
+    try:
+        async with session.get(url, headers={"User-Agent": UA}, timeout=aiohttp.ClientTimeout(total=2.5)) as r:
+            if r.status == 200:
+                t = (await r.content.read(8192)).decode("utf-8", "ignore")
+                hs = [int(m) for m in re.findall(r"RESOLUTION=\d+x(\d+)", t)]
+                h = max(hs) if hs else None
+    except Exception:
+        pass
+    _probe[url] = (time.time(), h)
+    if len(_probe) > 3000:
+        for k in sorted(_probe, key=lambda k: _probe[k][0])[:1000]:
+            _probe.pop(k, None)
+    return h
+
+
+async def with_probe(session, srcs):
+    def ep1(s):
+        try:
+            u = s["groups"][0]["eps"][0]["url"]
+            return u if re.search(r"\.m3u8", u, re.I) else None
+        except Exception:
+            return None
+    urls = [ep1(s) for s in srcs]
+    jobs = [probe_res(session, u) for u in urls if u]
+    if jobs:
+        await asyncio.wait([asyncio.ensure_future(j) for j in jobs], timeout=1.5)
+    return [dict(s, pres=_probe.get(u, (0, None))[1]) if u else s for s, u in zip(srcs, urls)]
+
+
 async def api_resolve(req):
     name, year = req.query.get("name", "").strip(), re.sub(r"\D", "", req.query.get("year", ""))[:4]
     full = req.query.get("full") == "1"
@@ -771,7 +809,7 @@ async def api_resolve(req):
     key = f"{canon(name)}|{year}"
     c = _cache.get("res:" + key)
     if c and time.time() - c[0] < 1800:
-        return web.json_response({"sources": with_learn(c[1], client_geo(req)), "done": True, "geo": client_geo(req)})
+        return web.json_response({"sources": with_learn(await with_probe(req.app["session"], c[1]), client_geo(req)), "done": True, "geo": client_geo(req)})
     session = req.app["session"]
     tasks = _resolving.get(key)
     if not tasks:
@@ -796,7 +834,7 @@ async def api_resolve(req):
             if not first and any(t.result() for t in done):
                 first = time.time()
     found = [t.result() for t in tasks if t.done() and t.result()]
-    return web.json_response({"sources": with_learn(order_sources(found), client_geo(req)), "done": all(t.done() for t in tasks), "geo": client_geo(req)})
+    return web.json_response({"sources": with_learn(await with_probe(session, order_sources(found)), client_geo(req)), "done": all(t.done() for t in tasks), "geo": client_geo(req)})
 
 
 
