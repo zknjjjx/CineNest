@@ -439,3 +439,14 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
 .tabs-m a.on svg{filter:drop-shadow(0 0 6px rgba(255,90,54,.8))}
 @media (max-width:760px){.slide .txt{max-width:100%;padding:0 20px 46px}.slide h2{font-size:26px}.hero{height:auto}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01s!important}}
+
+/* ===== v32 首屏大海报 + 彩色导航 ===== */
+.thumbs{top:50%;height:84%;max-width:60%;padding:0 18px;gap:18px}
+.thumbs .th{height:84%;width:auto;aspect-ratio:2/3;border-radius:14px}
+.thumbs .th span{font-size:14px;padding:26px 10px 9px}
+.thumbs .th.on{transform:scale(1.1);margin:0 12px}
+.slide .txt{max-width:38%}
+.tabs-d a span{background:linear-gradient(100deg,#ffd9bf,#ffbf94);-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .8s ease}
+.tabs-d a:hover span,.tabs-d a.on span{background:linear-gradient(100deg,var(--ac),var(--ac2) 40%,#fff1d6 50%,var(--ac2) 60%,var(--ac));background-size:220% 100%;-webkit-background-clip:text;background-clip:text;animation:shine 4s linear infinite}
+.tabs-d a:hover span{filter:brightness(1.15)}
+.tabs-d a.on{background:rgba(255,90,54,.10);box-shadow:inset 0 0 0 1px rgba(255,140,80,.25)}
