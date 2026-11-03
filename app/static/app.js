@@ -389,7 +389,7 @@ class Player {
     $$(".ep", sec).forEach(b => b.onclick = () => { this._pg = undefined; this.play(+b.dataset.i, 0); });
     this.drawer(eps, seen, upd);
   }
-  drawer(eps, seen, upd) { // 电脑版：播放画面左侧隐藏式选集栏，鼠标移到左边缘滑出，滚轮上下翻
+  drawer(eps, seen, upd) { // 电脑版：播放画面右侧隐藏式选集栏，鼠标移到右边缘滑出，滚轮上下翻
     const w = $("#pwrap"); if (!w || eps.length < 2) { $("#epdr")?.remove(); return; }
     let d = $("#epdr");
     if (!d) { w.insertAdjacentHTML("beforeend", `<div class="epdr" id="epdr"><div class="epdr-hot"></div><div class="epdr-p"><div class="epdr-h"><span>选集</span><small></small></div><div class="epdr-l"></div></div></div>`); d = $("#epdr"); }
