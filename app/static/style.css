@@ -360,3 +360,82 @@ body.rfs .pwrap.vert video{width:100%;height:100%;aspect-ratio:auto}
 @media (max-width:1300px){.dt-top{grid-template-columns:200px minmax(0,1fr) minmax(340px,440px);column-gap:28px}.dt-top .ps{width:200px}}
 @media (max-width:1100px){.dt-top{grid-template-columns:200px minmax(0,1fr)}.dt-top .side{max-height:none}}
 @media (max-width:760px){.dt-top{grid-template-columns:120px minmax(0,1fr);column-gap:16px}.dt-top .ps{width:120px}.dt-top .side{padding:14px 16px}.side .intro{font-size:14px}}
+
+/* ===== v31 光效 ===== */
+body{background:transparent}
+body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:none;
+  background:radial-gradient(40vmax 30vmax at 15% 10%,rgba(255,90,54,.10),transparent 60%),radial-gradient(36vmax 28vmax at 85% 30%,rgba(120,90,255,.09),transparent 60%),radial-gradient(40vmax 30vmax at 50% 95%,rgba(255,181,71,.07),transparent 60%);
+  animation:aurora 26s ease-in-out infinite alternate;will-change:transform}
+@keyframes aurora{50%{transform:translate3d(4vmax,-3vmax,0) rotate(6deg)}100%{transform:translate3d(-3vmax,2vmax,0) rotate(-4deg)}}
+/* 顶栏底部流光 */
+.top::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(255,90,54,.0) 20%,rgba(255,140,80,.9) 45%,rgba(255,210,120,1) 50%,rgba(255,140,80,.9) 55%,transparent 80%);background-size:250% 100%;animation:flow 7s linear infinite;opacity:.7}
+@keyframes flow{from{background-position:150% 0}to{background-position:-100% 0}}
+/* 品牌：流光字 + 呼吸 logo */
+.brand .bn b{background:linear-gradient(90deg,var(--ac),var(--ac2) 30%,#fff3d6 45%,var(--ac2) 60%,var(--ac));background-size:220% 100%;-webkit-background-clip:text;background-clip:text;animation:shine 5s linear infinite}
+@keyframes shine{from{background-position:110% 0}to{background-position:-110% 0}}
+.brand .logo{position:relative;overflow:hidden;animation:breathe 3.2s ease-in-out infinite}
+.brand .logo::after{content:"";position:absolute;inset:-50%;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.75) 50%,transparent 60%);transform:translateX(-100%);animation:sheen 4s ease-in-out infinite}
+@keyframes breathe{50%{box-shadow:0 4px 28px rgba(255,110,60,.85),0 0 0 4px rgba(255,90,54,.12)}}
+@keyframes sheen{0%,60%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.brand:hover .bn{text-shadow:0 0 18px rgba(255,255,255,.35)}
+/* 导航：缓缓点亮 */
+.tabs-d a{position:relative;transition:color .7s ease,text-shadow .9s ease,background .7s ease}
+.tabs-d a::before{content:"";position:absolute;inset:0;border-radius:inherit;background:radial-gradient(60% 90% at 50% 100%,rgba(255,120,60,.32),transparent 70%);opacity:0;transition:opacity .9s ease}
+.tabs-d a::after{content:"";position:absolute;left:22%;right:22%;bottom:3px;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,#ffd08a,transparent);box-shadow:0 0 10px #ff9a5a,0 0 18px rgba(255,90,54,.7);transform:scaleX(0);transition:transform .8s cubic-bezier(.2,.8,.2,1)}
+.tabs-d a:hover{color:#fff;text-shadow:0 0 12px rgba(255,200,140,.9),0 0 26px rgba(255,110,60,.55)}
+.tabs-d a:hover::before,.tabs-d a.on::before{opacity:1}
+.tabs-d a:hover::after,.tabs-d a.on::after{transform:scaleX(1)}
+.tabs-d a.on{color:#fff;background:rgba(255,255,255,.06);text-shadow:0 0 14px rgba(255,170,110,.6)}
+.sbox{transition:border-color .6s,background .6s,box-shadow .6s}
+.sbox:hover{background:rgba(255,255,255,.1)}
+.sbox:focus-within{box-shadow:0 0 0 4px rgba(255,90,54,.12),0 0 24px rgba(255,90,54,.25)}
+
+/* 首屏：更饱满 */
+.hero{height:clamp(400px,34vw,540px);box-shadow:0 30px 80px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.05)}
+.slide .bgp{inset:-30px;filter:blur(6px) brightness(.62) saturate(1.35);transform:scale(1.08)}
+.slide.on .bgp{animation:kenburns 14s ease-out both}
+@keyframes kenburns{from{transform:scale(1.08) translate3d(0,0,0)}to{transform:scale(1.22) translate3d(-2%,-2%,0)}}
+.slide .shade{background:linear-gradient(90deg,rgba(11,12,16,.92) 0%,rgba(11,12,16,.55) 42%,rgba(11,12,16,.25) 100%),linear-gradient(0deg,rgba(11,12,16,.8),transparent 50%),radial-gradient(60% 80% at 20% 50%,rgba(255,90,54,.12),transparent 70%)}
+.slide .txt{padding-left:clamp(36px,4vw,64px);max-width:42%}
+.slide h2{font-size:clamp(30px,3.6vw,56px);background:linear-gradient(100deg,#fff 30%,#ffe2c4 45%,#fff 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 6s linear infinite}
+.slide .m{font-size:15px}
+.slide .tag{position:relative;overflow:hidden;box-shadow:0 0 16px rgba(255,90,54,.25)}
+.slide .tag::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,rgba(255,255,255,.5) 50%,transparent 65%);transform:translateX(-100%);animation:sheen 3.5s ease-in-out infinite}
+.slide.on .txt>*{animation:rise .8s cubic-bezier(.2,.8,.2,1) both}
+.slide.on .txt>:nth-child(2){animation-delay:.08s}.slide.on .txt>:nth-child(3){animation-delay:.16s}.slide.on .txt>:nth-child(4){animation-delay:.24s}
+@keyframes rise{from{opacity:0;transform:translateY(22px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+.thumbs .th{width:clamp(100px,9.6vw,150px)}
+.thumbs .th.on{box-shadow:0 0 0 2px var(--ac),0 0 28px rgba(255,110,60,.6),0 14px 30px rgba(0,0,0,.4);animation:glowp 2.4s ease-in-out infinite}
+@keyframes glowp{50%{box-shadow:0 0 0 2px #ffb547,0 0 40px rgba(255,150,80,.75),0 14px 30px rgba(0,0,0,.4)}}
+.thumbs .th:hover{transform:scale(1);opacity:1}
+.thumbs .th.on b{background:linear-gradient(90deg,var(--ac),#ffd08a);box-shadow:0 0 8px #ffb547}
+/* 星光 */
+.spark{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.spark i{position:absolute;width:3px;height:3px;border-radius:50%;background:#fff;box-shadow:0 0 6px 2px rgba(255,220,170,.9),0 0 14px 4px rgba(255,140,80,.4);opacity:0;animation:twinkle var(--d,4s) ease-in-out var(--w,0s) infinite}
+.spark i:nth-child(3n){width:2px;height:2px}
+.spark i:nth-child(5n){background:#ffd9a8}
+@keyframes twinkle{0%,100%{opacity:0;transform:translateY(0) scale(.4)}50%{opacity:1;transform:translateY(-18px) scale(1)}}
+
+/* 按钮 */
+.btn.pri{position:relative;overflow:hidden;transition:transform .2s,box-shadow .5s,filter .3s}
+.btn.pri::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,rgba(255,255,255,.55) 50%,transparent 65%);transform:translateX(-120%);animation:sheen 3.8s ease-in-out infinite}
+.btn.pri:hover{box-shadow:0 10px 34px rgba(255,90,54,.6),0 0 0 4px rgba(255,90,54,.15);transform:translateY(-2px)}
+.btn.sec{transition:background .4s,box-shadow .4s}
+.btn.sec:hover{background:rgba(255,255,255,.2);box-shadow:0 0 20px rgba(255,255,255,.15)}
+/* 分栏标题 */
+.row-h h3::before{box-shadow:0 0 10px rgba(255,110,60,.8);animation:glowbar 2.8s ease-in-out infinite}
+@keyframes glowbar{50%{box-shadow:0 0 18px rgba(255,170,90,1)}}
+/* 卡片：浮起 + 扫光 */
+.card .ph{transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s}
+.card .ph::before{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(115deg,transparent 35%,rgba(255,255,255,.35) 50%,transparent 65%);transform:translateX(-120%)}
+.card:hover .ph{transform:translateY(-6px);box-shadow:0 18px 36px rgba(0,0,0,.5),0 0 0 1px rgba(255,140,80,.45),0 0 26px rgba(255,90,54,.3)}
+.card:hover .ph::before{transform:translateX(120%);transition:transform .9s ease}
+.card:hover .t{color:#ffb08a}
+.chip{transition:color .5s,background .5s,box-shadow .5s,border-color .5s}
+.chip:hover{color:#fff;box-shadow:0 0 14px rgba(255,90,54,.25)}
+.ep{transition:background .3s,box-shadow .4s,color .3s}
+.ep:hover{box-shadow:0 0 14px rgba(255,90,54,.25)}
+.tabs-m a.on svg{filter:drop-shadow(0 0 6px rgba(255,90,54,.8))}
+@media (max-width:760px){.slide .txt{max-width:100%;padding:0 20px 46px}.slide h2{font-size:26px}.hero{height:auto}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01s!important}}

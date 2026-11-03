@@ -73,7 +73,8 @@ function hero(items, tok) {
     <div class="txt"><div class="tag">今日推荐 · ${i + 1}/${items.length}</div><h2>${esc(it.title)}</h2><div class="m">${it.rate ? `<span class="rate">${it.rate}</span>` : ""}<span>${esc(short(it.sub))}</span></div>
     <div class="acts" style="justify-content:inherit"><a class="btn pri" href="#/d/movie/${it.id}/play">${ICON_PLAY}立即播放</a><a class="btn sec" href="#/d/movie/${it.id}">详情</a></div></div></div>`).join("") +
     `<div class="thumbs">${items.map((it, i) => `<a class="th${i ? "" : " on"}" data-i="${i}" title="${esc(it.title)}">${img(it.pic, it.title)}<span>${esc(it.title)}</span><b></b></a>`).join("")}</div>` +
-    `<div class="dots">${items.map((_, i) => `<i class="${i ? "" : "on"}" data-i="${i}"></i>`).join("")}</div>`;
+    `<div class="dots">${items.map((_, i) => `<i class="${i ? "" : "on"}" data-i="${i}"></i>`).join("")}</div>` +
+    `<div class="spark">${Array.from({ length: 26 }, () => `<i style="left:${(Math.random() * 100).toFixed(1)}%;top:${(Math.random() * 100).toFixed(1)}%;--d:${(3 + Math.random() * 4).toFixed(1)}s;--w:${(Math.random() * 5).toFixed(1)}s"></i>`).join("")}</div>`;
   let cur = 0;
   const show = n => { cur = (n + items.length) % items.length; $$(".slide", el).forEach((s, i) => s.classList.toggle("on", i === cur)); $$(".dots i,.thumbs .th", el).forEach(s => s.classList.toggle("on", +s.dataset.i === cur)); const tb = $(".thumbs", el), a = $(".thumbs .th.on", el); if (tb && a && tb.offsetParent) tb.scrollLeft = a.offsetLeft - tb.clientWidth / 2 + a.offsetWidth / 2; restart(); };
   const restart = () => { clearInterval(window._heroT); window._heroT = setInterval(() => { if (tok !== routeToken) return clearInterval(window._heroT); show(cur + 1); }, 6000); };
