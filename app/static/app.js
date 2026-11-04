@@ -201,6 +201,7 @@ function renderDetail(tok, m, autoplay) {
 }
 
 /* ---------- 页面 / 悬浮 / 全屏 切换 ---------- */
+const STANDALONE = !!(navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches));
 const Modes = {
   pipOK(v) { return (document.pictureInPictureEnabled && !v.disablePictureInPicture) || typeof v.webkitSetPresentationMode === "function"; },
   inPip(v) { return document.pictureInPictureElement === v || v.webkitPresentationMode === "picture-in-picture"; },
@@ -213,6 +214,7 @@ const Modes = {
   pip(v) {
     const exitPip = () => { if (document.pictureInPictureElement && document.exitPictureInPicture) document.exitPictureInPicture().catch(() => { }); else if (v.webkitSetPresentationMode) v.webkitSetPresentationMode("inline"); };
     if (this.inPip(v)) return exitPip();
+    if (STANDALONE && (IS_IOS || IS_SAFARI)) { toast("主屏幕 App 里 iOS 不允许悬浮。想悬浮，请在 Safari 里打开本站", 5000); return; }
     if (v.readyState < 1) { toast("视频开始播放后才能悬浮"); return; }
     v.disablePictureInPicture = false; v.removeAttribute("disablepictureinpicture");
     if (this.rfsOn()) document.body.classList.remove("rfs");
@@ -243,6 +245,7 @@ const Modes = {
       // iPhone：用系统原生全屏（自带画中画图标、跟随手机自动横屏），在点击里同步调用；失败才退回“旋转铺满”
       if (this.inPip(v)) v.webkitSetPresentationMode("inline");
       this.mark(v);
+      if (STANDALONE) return this.enterRfs(v); // 主屏幕 App：原生全屏也没有小窗，保留带选集的旋转铺满
       try { if (v.readyState < 1) throw 0; v.webkitEnterFullscreen(); return; } catch (e) { return this.enterRfs(v); }
     }
     this.mark(v);
@@ -279,6 +282,19 @@ const Modes = {
     v.addEventListener("enterpictureinpicture", () => { if (!v._markAt || Date.now() - v._markAt > 1500) this.mark(v); });
     v.addEventListener("leavepictureinpicture", () => this.resume(v));
     v.addEventListener("webkitpresentationmodechanged", () => { if (v.webkitPresentationMode === "inline") this.resume(v); else this.mark(v); });
+    // Safari：播放中上滑回桌面/切走时尝试自动进小窗（配合 autopictureinpicture；系统不允许时静默忽略）
+    if (!STANDALONE) {
+      try { v.autoPictureInPicture = true; } catch (e) { }
+      const autoPip = () => {
+        if (document.visibilityState !== "hidden" || v.paused || v.ended || this.inPip(v) || v.readyState < 2) return;
+        try {
+          if (typeof v.webkitSetPresentationMode === "function" && v.webkitPresentationMode !== "fullscreen") v.webkitSetPresentationMode("picture-in-picture");
+          else if (v.requestPictureInPicture && !v.webkitSetPresentationMode) v.requestPictureInPicture().catch(() => { });
+        } catch (e) { }
+      };
+      document.addEventListener("visibilitychange", autoPip);
+      addEventListener("pagehide", autoPip);
+    }
     // 手机横过来时自动全屏（安卓支持；iPhone 由系统处理）
     const mq = window.matchMedia && matchMedia("(orientation: landscape)");
     const onRot = () => {
