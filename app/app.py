@@ -15,7 +15,7 @@ from aiohttp import web
 DATA = os.environ.get("DATA_DIR", "/data")
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
-SEARCH_TIMEOUT = float(os.environ.get("SEARCH_TIMEOUT", "10"))
+SEARCH_TIMEOUT = float(os.environ.get("SEARCH_TIMEOUT", "5"))
 _sites_cache = {"mtime": 0, "sites": []}
 
 
@@ -99,7 +99,7 @@ async def api_search(req):
 
     async def one(s):
         try:
-            d = await get_json(session, f"{s['api']}/?ac=videolist&wd={quote(wd)}", SEARCH_TIMEOUT if s.get("ok", True) else 4)
+            d = await get_json(session, f"{s['api']}/?ac=videolist&wd={quote(wd)}", SEARCH_TIMEOUT)
             return [brief(v, s) for v in (d.get("list") or [])]
         except Exception:
             return []
@@ -587,7 +587,7 @@ async def resolve_all(session, name, year):
     async def one(s):
         t0 = time.time()
         try:
-            d = await get_json(session, f"{s['api']}/?ac=videolist&wd={quote(name)}", SEARCH_TIMEOUT if s.get("ok", True) else 4)
+            d = await get_json(session, f"{s['api']}/?ac=videolist&wd={quote(name)}", SEARCH_TIMEOUT)
         except Exception:
             return None
         best = None
@@ -901,27 +901,35 @@ SHORT_RE = re.compile(r"短剧|爽剧|爽文")
 SHORT_BAD = re.compile(r"擦边|伦理|福利")
 
 
-def short_sources(limit=3):
-    out = []
-    for s in sites():
-        cls = s.get("classes") or []
+_short_src = [0, []]
+
+
+async def short_sources(session, limit=3):
+    """在前面的源里找“短剧”分类（懒加载，缓存 6 小时）"""
+    if _short_src[1] and time.time() - _short_src[0] < 6 * 3600:
+        return _short_src[1]
+    top = sites()[:24]
+    async def one(s):
+        try:
+            cls = await get_classes(session, s["api"])
+        except Exception:
+            return None
         pids = {c["pid"] for c in cls}
-        cand = [c for c in cls if SHORT_RE.search(c.get("name") or "") and not SHORT_BAD.search(c.get("name") or "")
-                and c["id"] not in pids and (c.get("n") or 0) > 0]
-        if cand:
-            best = max(cand, key=lambda c: c.get("n") or 0)
-            out.append((best.get("n") or 0, s, best["id"]))
-    # 优先用实测稳定快速、短剧量大的站，其余按测速顺序补位
+        cand = [c for c in cls if SHORT_RE.search(c.get("name") or "") and not SHORT_BAD.search(c.get("name") or "") and c["id"] not in pids]
+        return (s, cand[0]["id"]) if cand else None
+    res = [r for r in await asyncio.gather(*[one(s) for s in top]) if r]
     pref = ["360zy.com", "dyttzyapi", "lziapi", "ffzyapi"]
-    rank = lambda x: next((i for i, k in enumerate(pref) if k in x[1]["api"]), 99)
-    big = sorted([x for x in out if x[0] > 1000] or out, key=rank)
-    return [(s, cid) for _, s, cid in big[:limit]]
+    rank = lambda x: next((i for i, k in enumerate(pref) if k in x[0]["api"]), 99)
+    out = sorted(res, key=rank)[:limit]
+    if out:
+        _short_src[:] = [time.time(), out]
+    return out
 
 
 async def api_shorts(req):
     pg = max(1, int(req.query.get("pg", 1) or 1))
     session = req.app["session"]
-    srcs = short_sources()
+    srcs = await short_sources(session)
     async def one(s, cid):
         path = f"{s['api']}/?ac=videolist&t={cid}&pg={pg}"
         try:

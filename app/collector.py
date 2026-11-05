@@ -1,8 +1,7 @@
-"""读取用户设置的影视源接口 + 每日本地测速
-- 接口在首页「设置」里填（/data/settings.json），可多个，启用的合并去重；/data/extra.txt 可手动补充
-- 用本机网络逐个测速：分类列表 + 视频列表 + m3u8 可达。测不通的不删除，只排到后面
-  （家里联通不通的源，换到单位电信可能能用；播放时会自动跳过连不上的源）
-- 输出 /data/sites.json（能通的按速度在前，不通的在后）和 /data/status.json
+"""读取用户设置的影视源接口，合并去重写出 /data/sites.json（不测速、不删源）
+- 接口在首页「设置」里填（/data/settings.json），可多个，启用的按顺序合并；/data/extra.txt 可手动补充
+- 顺序沿用接口内顺序（公共接口已按人气排好）；播放时前端实时测速，自动跳过连不上的源
+- 输出 /data/sites.json 和 /data/status.json
 - 每天 RUN_AT(默认 04:00 Asia/Shanghai) 跑一次；/data/trigger 文件出现时立即重跑（保存设置时会触发）
 """
 import asyncio, json, os, re, time, datetime, random
@@ -81,134 +80,28 @@ async def gather_candidates(session):
     return list(cands.values()), up_stats
 
 
-def dead(site):
-    return {"name": site["name"], "api": site["api"], "latency": None, "total": 0, "updated": "", "adult": False, "ok": False}
-
-
-async def check_site(session, site, sem):
-    r = await _check_site(session, site, sem)
-    return r
-
-
-async def _check_site(session, site, sem):
-    async with sem:
-        api = site["api"]
-        t0 = time.time()
-        try:
-            async with session.get(api + "/?ac=list", timeout=aiohttp.ClientTimeout(total=TIMEOUT), headers={"User-Agent": UA}) as r:
-                if r.status != 200:
-                    return None
-                data = json.loads(await r.text(errors="replace"))
-            classes = [c.get("type_name", "") for c in data.get("class", []) or []]
-            if not isinstance(data.get("list"), list) or not classes:
-                return None
-            latency = int((time.time() - t0) * 1000)
-            adult_hits = sum(1 for c in classes if any(w.lower() in c.lower() for w in ADULT_WORDS))
-            adult = adult_hits >= 3 or adult_hits / max(1, len(classes)) > 0.3
-            if adult and not ALLOW_ADULT:
-                return "adult"
-            async with session.get(api + "/?ac=videolist&pg=1", timeout=aiohttp.ClientTimeout(total=TIMEOUT), headers={"User-Agent": UA}) as r:
-                vd = json.loads(await r.text(errors="replace"))
-            vlist = vd.get("list") or []
-            m3u8 = None
-            for v in vlist[:10]:
-                mm = re.search(r"https?://[^\s$#]+?\.m3u8[^\s$#]*", v.get("vod_play_url") or "")
-                if mm:
-                    m3u8 = mm.group(0); break
-            if not m3u8:
-                return None
-            async with session.get(m3u8, timeout=aiohttp.ClientTimeout(total=TIMEOUT), headers={"User-Agent": UA}) as r:
-                body = (await r.content.read(2048)).decode(errors="replace")
-                if r.status != 200 or "#EXTM3U" not in body:
-                    return None
-            total = int(vd.get("total") or data.get("total") or 0)
-            return {"name": site["name"], "api": api, "latency": latency, "total": total,
-                    "updated": max((v.get("vod_time", "") for v in vlist), default=""),
-                    "adult": adult, "ok": True}
-        except Exception:
-            return None
-
-
-async def probe_classes(session, site):
-    """拉分类并统计每个分类的片量，空分类剔除（大类若子分类有片则保留）"""
-    try:
-        async with session.get(site["api"] + "/?ac=list", timeout=aiohttp.ClientTimeout(total=TIMEOUT), headers={"User-Agent": UA}) as r:
-            d = json.loads(await r.text(errors="replace"))
-        cls = [{"id": str(x.get("type_id")), "pid": str(x.get("type_pid", 0) or 0), "name": x.get("type_name") or ""}
-               for x in d.get("class") or []]
-    except Exception:
-        return
-    sem = asyncio.Semaphore(3)
-    async def cnt(c):
-        async with sem:
-            for _ in range(3):
-                try:
-                    async with session.get(f'{site["api"]}/?ac=list&t={c["id"]}&pg=1', timeout=aiohttp.ClientTimeout(total=TIMEOUT), headers={"User-Agent": UA}) as r:
-                        j = json.loads(await r.text(errors="replace"))
-                    return int(j.get("total") or len(j.get("list") or []))
-                except Exception:
-                    await asyncio.sleep(1)
-            return -1
-    ns = await asyncio.gather(*[cnt(c) for c in cls])
-    for c, n in zip(cls, ns):
-        c["n"] = n
-    if not ALLOW_ADULT:
-        cls = [c for c in cls if not any(w.lower() in c["name"].lower() for w in ADULT_WORDS)]
-    has_kid = lambda c: any(k["pid"] == c["id"] and k["n"] != 0 for k in cls)
-    site["classes"] = [c for c in cls if c["n"] > 0 or (c["n"] != 0 and c["pid"] != "0") or has_kid(c)]
-
-
 async def run_once():
+    """不测速、不过滤：按接口顺序（接口内已按人气排好）合并去重后直接写出，播放时由前端测速并跳过不通的源"""
     started = time.time()
-    conn = aiohttp.TCPConnector(ssl=False, limit=40)
+    conn = aiohttp.TCPConnector(ssl=False, limit=10)
     async with aiohttp.ClientSession(connector=conn) as session:
         cands, up_stats = await gather_candidates(session)
-        sem = asyncio.Semaphore(20)
-        results = await asyncio.gather(*[check_site(session, s, sem) for s in cands])
-        # 失败的再试一次（采集站偶发慢/抖动）
-        retry = [s for s, r in zip(cands, results) if not r]
-        sem2 = asyncio.Semaphore(10)
-        results2 = await asyncio.gather(*[check_site(session, s, sem2) for s in retry])
-    final = {}
-    for s_, r in zip(cands, results):
-        final[s_["api"]] = r
-    for s_, r in zip(retry, results2):
-        final[s_["api"]] = r
-    valid = [r for r in final.values() if isinstance(r, dict)]
-    bad = [dead(s_) for s_ in cands if final.get(s_["api"]) is None]
-    # 同名去重：保留更快的
-    valid.sort(key=lambda x: x["latency"])
-    used, hosts, uniq = set(), set(), []
-    for r in valid + bad:
-        host = (urlparse(r["api"]).hostname or "").removeprefix("www.")
-        fp = (r["total"], r["updated"])
-        if host in hosts or (r["total"] and fp in hosts):
-            continue  # 同一域名或同一后端(片量+更新时间相同)只留最快的
-        hosts.add(host); hosts.add(fp)
-        if r["name"] in used:
-            r["name"] = f'{r["name"]}·{host.split(".")[0]}'
-        used.add(r["name"])
-        uniq.append(r)
-    valid = [r for r in uniq if r["ok"]]
-    bad = [r for r in uniq if not r["ok"]]
-    conn2 = aiohttp.TCPConnector(ssl=False, limit=30)
-    async with aiohttp.ClientSession(connector=conn2) as session:
-        sem3 = asyncio.Semaphore(6)
-        async def pc(site):
-            async with sem3:
-                await probe_classes(session, site)
-        await asyncio.gather(*[pc(v) for v in valid])
-    log("分类统计完成")
+    used, out = set(), []
+    for s in cands:
+        name = s["name"] or urlparse(s["api"]).hostname
+        if name in used:
+            name = f'{name}·{(urlparse(s["api"]).hostname or "").removeprefix("www.").split(".")[0]}'
+        used.add(name)
+        out.append({"name": name, "api": s["api"]})
     os.makedirs(DATA, exist_ok=True)
     tmp = os.path.join(DATA, "sites.json.tmp")
-    json.dump(valid + bad, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    json.dump(out, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(DATA, "sites.json"))
     status = {"last_run": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-              "candidates": len(cands), "valid": len(valid), "dead": len(bad),
-              "interfaces": len(up_stats),
+              "candidates": len(out), "interfaces": len(up_stats),
               "seconds": round(time.time() - started, 1), "upstreams": up_stats}
     json.dump(status, open(os.path.join(DATA, "status.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    log(f"完成：候选 {len(cands)}，能通 {len(valid)}，不通 {len(bad)}，用时 {status['seconds']}s")
+    log(f"完成：{len(out)} 个源，用时 {status['seconds']}s")
 
 
 def seconds_until(hhmm):
@@ -237,7 +130,7 @@ async def main():
         while wait > 0:
             if os.path.exists(trigger):
                 break
-            await asyncio.sleep(min(15, wait)); wait -= 15
+            await asyncio.sleep(min(3, wait)); wait -= 3
         if os.path.exists(trigger):
             try: os.remove(trigger)
             except Exception: pass

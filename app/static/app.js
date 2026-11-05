@@ -147,10 +147,10 @@ function historyPage() {
 async function sitesPage() {
   const { sites, status } = await J("/api/sites");
   const ok = sites.filter(x => x.ok !== false).length;
-  app.innerHTML = `<div class="pagehead"><h2>影视源状态</h2></div><div class="srcstat" style="margin-bottom:12px">上次检测 ${esc(status.last_run || "—")} · 共 ${sites.length} · 能通 ${ok} · 不通 ${sites.length - ok} · 每天 04:00 自动测速（不通的不删除，只排在后面）</div>
-  <div style="display:flex;gap:10px;margin-bottom:16px"><button class="btn sec" id="rf">立即重新检测</button><button class="btn sec" id="cf">接口设置</button></div>
-  ${sites.length ? `<table class="tbl"><tr><th>#</th><th>名称</th><th>延迟</th><th>片量</th></tr>${sites.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td>${s.ok === false ? `<td class="dead">不通</td><td class="dead">—</td>` : `<td>${s.latency}ms</td><td>${s.total || "—"}</td>`}</tr>`).join("")}</table>` : `<div class="empty">还没有影视源，先在设置里填接口</div>`}`;
-  $("#rf").onclick = async () => { const r = await fetch("/api/refresh", { method: "POST" }).then(r => r.json()).catch(() => ({})); toast(r.ok ? "已开始检测，几分钟后刷新查看" : (r.msg || "失败")); if (!r.ok) openSettings(); };
+  app.innerHTML = `<div class="pagehead"><h2>影视源状态</h2></div><div class="srcstat" style="margin-bottom:12px">上次更新 ${esc(status.last_run || "—")} · 共 ${sites.length} 个源 · 按接口里的顺序（人气）排列，不测速不删源，播放时自动跳过连不上的</div>
+  <div style="display:flex;gap:10px;margin-bottom:16px"><button class="btn sec" id="rf">重新拉取接口</button><button class="btn sec" id="cf">接口设置</button></div>
+  ${sites.length ? `<table class="tbl"><tr><th>#</th><th>名称</th><th>域名</th></tr>${sites.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${esc((s.api.match(/\/\/([^/:]+)/) || [])[1] || "")}</td></tr>`).join("")}</table>` : `<div class="empty">还没有影视源，先在设置里填接口</div>`}`;
+  $("#rf").onclick = async () => { const r = await fetch("/api/refresh", { method: "POST" }).then(r => r.json()).catch(() => ({})); toast(r.ok ? "已开始拉取，十几秒后刷新查看" : (r.msg || "失败")); if (!r.ok) openSettings(); };
   $("#cf").onclick = () => openSettings();
 }
 
@@ -176,7 +176,7 @@ async function openSettings() {
   let list = (st.interfaces || []).map(x => ({ ...x }));
   const draw = () => {
     sh.innerHTML = `<div class="grab"></div><h4>影视源接口</h4>
-      <p class="d">CineNest 本身不带片源。填一个或多个接口地址，启用的会合并去重，并在本机测速，连不上的自动排后。支持 CineNest、TVBox、MoonTV 格式和每行“名称,地址”的文本。</p>
+      <p class="d">CineNest 本身不带片源。填一个或多个接口地址，启用的按顺序合并去重，保存即用，播放时自动跳过连不上的源。支持 CineNest、TVBox、MoonTV 格式和每行“名称,地址”的文本。</p>
       <div id="iflist">${list.map((it, i) => `<div class="if${it.on === false ? " off" : ""}" data-i="${i}">
         <input class="in n" placeholder="名称，如 我的接口" value="${esc(it.name || "")}">
         <div class="ops"><button class="mini${it.on === false ? "" : " on"}" data-a="on">${it.on === false ? "已停用" : "启用中"}</button><button class="mini" data-a="test">测试</button><button class="mini" data-a="del">删除</button></div>
@@ -184,7 +184,7 @@ async function openSettings() {
         <div class="msg"></div></div>`).join("") || `<div class="empty" style="padding:18px 0">还没有接口</div>`}</div>
       <div class="row2"><button class="mini" id="add">＋ 添加接口</button>${list.some(x => x.url === st.public) ? "" : `<button class="mini" id="pub">＋ 填入公共接口</button>`}</div>
       <h5>GitHub 代理（可选）</h5><input class="in" id="ghp" placeholder="如 https://9797.cc.cd/ ，接口在 GitHub 上连不上时使用" value="${esc(st.gh_proxy || "")}" inputmode="url" autocapitalize="off" spellcheck="false">
-      <div class="foot"><button class="btn pri" id="sv">保存并测速</button><button class="btn sec" id="ss">影视源状态</button></div>
+      <div class="foot"><button class="btn pri" id="sv">保存</button><button class="btn sec" id="ss">影视源状态</button></div>
       <h5>管理密码</h5><div style="display:flex;gap:8px"><input class="in" type="password" id="np" placeholder="新密码（至少 4 位）" autocomplete="new-password"><button class="mini" id="cp">修改</button><button class="mini" id="lo">退出</button></div>`;
     const sync = () => { if ($("#ghp")) st.gh_proxy = $("#ghp").value.trim(); $$(".if", sh).forEach(r => { const i = +r.dataset.i; list[i].name = $(".n", r).value.trim(); list[i].url = $(".u", r).value.trim(); }); };
     $$(".if", sh).forEach(r => $$(".mini", r).forEach(b => b.onclick = async () => {
@@ -197,7 +197,7 @@ async function openSettings() {
     $("#add").onclick = () => { sync(); list.push({ name: "", url: "", on: true }); draw(); const l = $$(".if .n", sh).pop(); l && l.focus(); };
     if ($("#pub")) $("#pub").onclick = () => { sync(); list.push({ name: "CineNest 公共接口", url: st.public, on: true }); draw(); };
     $("#sv").onclick = async e => { sync(); e.target.disabled = true; const r = await post("/api/conf/save", { interfaces: list, gh_proxy: $("#ghp").value.trim() }); e.target.disabled = false;
-      if (r.ok) { toast("已保存，正在测速，约 1–3 分钟后生效"); close(); } else toast(r.msg || "保存失败"); };
+      if (r.ok) { toast("已保存，十几秒后生效"); close(); } else toast(r.msg || "保存失败"); };
     $("#ss").onclick = () => { close(); go("#/sites"); };
     $("#cp").onclick = async () => { const v = $("#np").value; const r = await post("/api/conf/save", { new_password: v }); toast(r.ok ? "密码已修改" : (r.msg || "失败")); if (r.ok) $("#np").value = ""; };
     $("#lo").onclick = async () => { await post("/api/conf/logout"); close(); toast("已退出"); };
