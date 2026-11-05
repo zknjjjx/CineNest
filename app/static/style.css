@@ -601,3 +601,29 @@ body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:n
 .srow.cur{box-shadow:inset 3px 0 0 var(--ac2)}
 .srow small{white-space:nowrap}
 .srow.auto small{white-space:normal}
+
+/* v50 设置 */
+.gear{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid var(--line);margin-left:10px;transition:background .3s,transform .5s}
+.gear svg{width:18px;height:18px;fill:var(--sub);transition:fill .3s}
+.gear:hover{background:rgba(255,255,255,.12)}.gear:hover svg{fill:var(--tx)}.gear:active{transform:rotate(60deg)}
+@media (max-width:760px){.gear{width:34px;height:34px;margin-left:6px}}
+.sheet.cfg{max-height:86vh;width:min(620px,100%)}
+.cfg p.d{color:var(--sub);font-size:13px;margin:0 0 12px;line-height:1.6}
+.cfg .in{width:100%;background:#0f1116;border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;outline:none;transition:border .2s,box-shadow .2s}
+.cfg .in:focus{border-color:rgba(255,90,54,.6);box-shadow:0 0 0 3px rgba(255,90,54,.14)}
+.cfg .if{background:#1d2029;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px;display:grid;grid-template-columns:1fr auto;gap:8px;animation:cfgin .35s cubic-bezier(.2,.8,.2,1)}
+.cfg .if .u{grid-column:1/-1}
+.cfg .if .ops{display:flex;gap:6px;align-items:center}
+.cfg .if.off{opacity:.55}
+@keyframes cfgin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.cfg .mini{font-size:12px;padding:6px 10px;border-radius:8px;background:#2a2e38;color:var(--sub)}
+.cfg .mini:hover{color:var(--tx)}
+.cfg .mini.on{background:rgba(62,207,142,.15);color:var(--ok)}
+.cfg .row2{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 4px}
+.cfg .msg{font-size:12px;color:var(--sub);grid-column:1/-1;min-height:0}
+.cfg .msg.ok{color:var(--ok)}.cfg .msg.bad{color:#ff6b6b}
+.cfg h5{font-size:14px;margin:18px 0 8px;color:var(--sub);font-weight:500}
+.cfg .foot{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-bottom:6px}
+.setup{margin:18px 0 6px;padding:22px;border-radius:16px;background:linear-gradient(135deg,rgba(255,90,54,.16),rgba(255,181,71,.08)),var(--card);border:1px solid rgba(255,90,54,.25);display:flex;gap:16px;align-items:center;flex-wrap:wrap;animation:cfgin .5s}
+.setup div{flex:1;min-width:220px}.setup b{display:block;font-size:17px;margin-bottom:4px}.setup span{color:var(--sub);font-size:14px}
+.tbl td.dead{color:var(--mute)}

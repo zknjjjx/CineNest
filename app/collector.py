@@ -1,8 +1,9 @@
-"""CMS 采集接口搜集 + 每日验活
-- 从种子列表和上游页面(GitHub gist / 博客 / 配置编辑器)中提取 api.php/provide/vod 接口
-- 用本机网络(家里宽带)逐个验活：分类列表 + 视频列表 + m3u8 可达
-- 输出 /data/sites.json（按速度排序）和 /data/status.json
-- 每天 RUN_AT(默认 04:00 Asia/Shanghai) 跑一次；/data/trigger 文件出现时立即重跑
+"""读取用户设置的影视源接口 + 每日本地测速
+- 接口在首页「设置」里填（/data/settings.json），可多个，启用的合并去重；/data/extra.txt 可手动补充
+- 用本机网络逐个测速：分类列表 + 视频列表 + m3u8 可达。测不通的不删除，只排到后面
+  （家里联通不通的源，换到单位电信可能能用；播放时会自动跳过连不上的源）
+- 输出 /data/sites.json（能通的按速度在前，不通的在后）和 /data/status.json
+- 每天 RUN_AT(默认 04:00 Asia/Shanghai) 跑一次；/data/trigger 文件出现时立即重跑（保存设置时会触发）
 """
 import asyncio, json, os, re, time, datetime, random
 from urllib.parse import urlparse
@@ -13,46 +14,6 @@ RUN_AT = os.environ.get("RUN_AT", "04:00")
 TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "15"))
 ALLOW_ADULT = os.environ.get("ALLOW_ADULT", "0") == "1"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
-
-UPSTREAMS = [
-    "https://vodtv.github.io/api/",
-    "https://gist.githubusercontent.com/lunatickochiya/748774c05c68c0bdf6cd078d88f5112b/raw",
-    "https://gist.githubusercontent.com/zyd16888/e186acbadc39a044b61a5361a1d5eb7c/raw",
-    "https://gist.githubusercontent.com/gagadesu/de299ec941c940e9596bb5745a24bd6f/raw",
-    "https://www.071058.com/index.php/archives/619/",
-    "https://github.com/waifu-project/movie/issues/45",
-    "https://gist.liushen.fun/LiuShen/backup-moontv-config",
-]
-
-SEEDS = {
-    "https://cj.lziapi.com/api.php/provide/vod": "量子资源",
-    "https://cj.ffzyapi.com/api.php/provide/vod": "非凡资源",
-    "https://api.ffzyapi.com/api.php/provide/vod": "非凡资源",
-    "https://api.maoyanapi.top/api.php/provide/vod": "猫眼资源",
-    "https://www.hongniuzy3.com/api.php/provide/vod": "红牛资源",
-    "https://bfzyapi.com/api.php/provide/vod": "暴风资源",
-    "https://wolongzyw.com/api.php/provide/vod": "卧龙资源",
-    "https://jszyapi.com/api.php/provide/vod": "极速资源",
-    "https://api.zuidapi.com/api.php/provide/vod": "最大资源",
-    "https://m3u8.apiyhzy.com/api.php/provide/vod": "樱花资源",
-    "https://ikunzyapi.com/api.php/provide/vod": "iKun资源",
-    "https://www.mdzyapi.com/api.php/provide/vod": "魔都资源",
-    "https://caiji.maotaizy.cc/api.php/provide/vod": "茅台资源",
-    "https://dbzy.tv/api.php/provide/vod": "豆瓣资源",
-    "https://mozhuazy.com/api.php/provide/vod": "魔爪资源",
-    "https://wwzy.tv/api.php/provide/vod": "旺旺短剧",
-    "https://tyyszyapi.com/api.php/provide/vod": "天涯影视",
-    "https://cj.yayazy.net/api.php/provide/vod": "丫丫资源",
-    "https://api.guangsuapi.com/api.php/provide/vod": "光速资源",
-    "https://360zy.com/api.php/provide/vod": "360资源",
-    "https://www.hongniuzy2.com/api.php/provide/vod": "红牛资源",
-    "https://sdzyapi.com/api.php/provide/vod": "闪电资源",
-    "https://jyzyapi.com/api.php/provide/vod": "金鹰资源",
-    "https://api.apibdzy.com/api.php/provide/vod": "百度资源",
-    "http://caiji.dyttzyapi.com/api.php/provide/vod": "电影天堂",
-    "https://suoniapi.com/api.php/provide/vod": "索尼资源",
-    "https://api.ukuapi.com/api.php/provide/vod": "U酷资源",
-}
 
 API_RE = re.compile(r"https?://[A-Za-z0-9._-]+(?::\d+)?(?:/[A-Za-z0-9._-]+)*?/api\.php/provide/vod", re.I)
 NAME_RE = re.compile(r"""["']?name["']?\s*[:=]\s*["']([^"'\n]{1,30})["']""")
@@ -79,16 +40,33 @@ async def fetch_text(session, url, timeout=15):
 
 
 async def gather_candidates(session):
-    cands = {}
-    for api, name in SEEDS.items():
-        cands[key_of(api)] = {"api": norm(api), "name": name}
-    # 保留上次有效的站点，避免上游消失后丢失
-    try:
-        for s in json.load(open(os.path.join(DATA, "sites.json"), encoding="utf-8")):
-            cands.setdefault(key_of(s["api"]), {"api": s["api"], "name": s["name"]})
-    except Exception:
-        pass
-    # 用户手工添加
+    import conf
+    cands, up_stats = {}, {}
+    cfg = conf.load()
+    for it in conf.interfaces(cfg):
+        if it.get("on") is False:
+            continue
+        url = it["url"].strip()
+        got = None
+        for u in conf.mirrors(url, cfg.get("gh_proxy")):
+            try:
+                text = await fetch_text(session, u, 12)
+                got = conf.parse(text)
+                if got:
+                    conf.cache_put(url, got)
+                    break
+            except Exception:
+                continue
+        if not got:
+            c = conf.cache_get(url)
+            got = (c or {}).get("sites") or []
+            up_stats[it.get("name") or url] = f"拉取失败，用缓存 {len(got)}" if got else "拉取失败"
+        else:
+            up_stats[it.get("name") or url] = len(got)
+        for s in got:
+            if s.get("adult") and not ALLOW_ADULT:
+                continue
+            cands.setdefault(key_of(s["api"]), {"api": norm(s["api"]), "name": s["name"]})
     try:
         for line in open(os.path.join(DATA, "extra.txt"), encoding="utf-8"):
             line = line.strip()
@@ -99,36 +77,20 @@ async def gather_candidates(session):
             cands[key_of(api)] = {"api": norm(api), "name": name or urlparse(api).hostname}
     except FileNotFoundError:
         pass
-    up_stats = {}
-    for u in UPSTREAMS:
-        try:
-            text = await fetch_text(session, u, 20)
-            n = 0
-            for m in API_RE.finditer(text):
-                api = norm(m.group(0))
-                k = key_of(api)
-                lb, rb = text.rfind("{", 0, m.start()), text.find("}", m.end())
-                name = ""
-                if lb != -1 and rb != -1 and rb - lb < 600 and "{" not in text[m.end():rb]:
-                    nm = NAME_RE.findall(text[lb:rb])
-                    name = nm[0].strip() if nm else ""
-                if not name:
-                    names = NAME_RE.findall(text[max(0, m.start() - 200):m.start()])
-                    name = names[-1].strip() if names else ""
-                name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)  # 去掉 emoji/符号前缀
-                if k not in cands:
-                    cands[k] = {"api": api, "name": name or (urlparse(api).hostname or api)}
-                    n += 1
-                elif name and cands[k]["name"] == urlparse(cands[k]["api"]).hostname:
-                    cands[k]["name"] = name
-            up_stats[u] = n
-        except Exception as e:
-            up_stats[u] = f"error: {type(e).__name__}"
     log("候选接口", len(cands), up_stats)
     return list(cands.values()), up_stats
 
 
+def dead(site):
+    return {"name": site["name"], "api": site["api"], "latency": None, "total": 0, "updated": "", "adult": False, "ok": False}
+
+
 async def check_site(session, site, sem):
+    r = await _check_site(session, site, sem)
+    return r
+
+
+async def _check_site(session, site, sem):
     async with sem:
         api = site["api"]
         t0 = time.time()
@@ -144,7 +106,7 @@ async def check_site(session, site, sem):
             adult_hits = sum(1 for c in classes if any(w.lower() in c.lower() for w in ADULT_WORDS))
             adult = adult_hits >= 3 or adult_hits / max(1, len(classes)) > 0.3
             if adult and not ALLOW_ADULT:
-                return None
+                return "adult"
             async with session.get(api + "/?ac=videolist&pg=1", timeout=aiohttp.ClientTimeout(total=TIMEOUT), headers={"User-Agent": UA}) as r:
                 vd = json.loads(await r.text(errors="replace"))
             vlist = vd.get("list") or []
@@ -162,7 +124,7 @@ async def check_site(session, site, sem):
             total = int(vd.get("total") or data.get("total") or 0)
             return {"name": site["name"], "api": api, "latency": latency, "total": total,
                     "updated": max((v.get("vod_time", "") for v in vlist), default=""),
-                    "adult": adult}
+                    "adult": adult, "ok": True}
         except Exception:
             return None
 
@@ -207,11 +169,17 @@ async def run_once():
         retry = [s for s, r in zip(cands, results) if not r]
         sem2 = asyncio.Semaphore(10)
         results2 = await asyncio.gather(*[check_site(session, s, sem2) for s in retry])
-    valid = [r for r in list(results) + list(results2) if r]
+    final = {}
+    for s_, r in zip(cands, results):
+        final[s_["api"]] = r
+    for s_, r in zip(retry, results2):
+        final[s_["api"]] = r
+    valid = [r for r in final.values() if isinstance(r, dict)]
+    bad = [dead(s_) for s_ in cands if final.get(s_["api"]) is None]
     # 同名去重：保留更快的
     valid.sort(key=lambda x: x["latency"])
     used, hosts, uniq = set(), set(), []
-    for r in valid:
+    for r in valid + bad:
         host = (urlparse(r["api"]).hostname or "").removeprefix("www.")
         fp = (r["total"], r["updated"])
         if host in hosts or (r["total"] and fp in hosts):
@@ -221,7 +189,8 @@ async def run_once():
             r["name"] = f'{r["name"]}·{host.split(".")[0]}'
         used.add(r["name"])
         uniq.append(r)
-    valid = uniq
+    valid = [r for r in uniq if r["ok"]]
+    bad = [r for r in uniq if not r["ok"]]
     conn2 = aiohttp.TCPConnector(ssl=False, limit=30)
     async with aiohttp.ClientSession(connector=conn2) as session:
         sem3 = asyncio.Semaphore(6)
@@ -232,20 +201,14 @@ async def run_once():
     log("分类统计完成")
     os.makedirs(DATA, exist_ok=True)
     tmp = os.path.join(DATA, "sites.json.tmp")
-    json.dump(valid, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    json.dump(valid + bad, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(DATA, "sites.json"))
     status = {"last_run": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-              "candidates": len(cands), "valid": len(valid),
+              "candidates": len(cands), "valid": len(valid), "dead": len(bad),
+              "interfaces": len(up_stats),
               "seconds": round(time.time() - started, 1), "upstreams": up_stats}
     json.dump(status, open(os.path.join(DATA, "status.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    log(f"完成：候选 {len(cands)}，有效 {len(valid)}，用时 {status['seconds']}s")
-    try:
-        import tvbox
-        r = await tvbox.auto_push()
-        if r:
-            log("TVBox 接口：", r.get("msg"))
-    except Exception as e:
-        log("TVBox 推送出错", e)
+    log(f"完成：候选 {len(cands)}，能通 {len(valid)}，不通 {len(bad)}，用时 {status['seconds']}s")
 
 
 def seconds_until(hhmm):
@@ -260,7 +223,11 @@ def seconds_until(hhmm):
 async def main():
     trigger = os.path.join(DATA, "trigger")
     sj = os.path.join(DATA, "sites.json")
-    if os.path.exists(sj) and time.time() - os.path.getmtime(sj) < 20 * 3600 and not os.path.exists(trigger):
+    cfg = os.path.join(DATA, "settings.json")
+    fresh = os.path.exists(sj) and time.time() - os.path.getmtime(sj) < 20 * 3600
+    if fresh and os.path.exists(cfg) and os.path.getmtime(cfg) > os.path.getmtime(sj):
+        fresh = False
+    if fresh and not os.path.exists(trigger):
         log("已有近期检测结果，跳过启动时检测")
     else:
         await run_once()

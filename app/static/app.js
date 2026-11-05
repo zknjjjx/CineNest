@@ -55,6 +55,9 @@ const dbList = (kind, cat, type, start = 0, limit = 20) => J(`/api/db/list?kind=
 
 async function home(tok) {
   const hist = H.all().slice(0, 12);
+  J("/api/conf").then(c => { if (tok !== routeToken || c.configured || $("#setup")) return;
+    $("#hero")?.insertAdjacentHTML("afterend", `<div class="setup" id="setup"><div><b>还没有影视源</b><span>CineNest 本身不带片源，填一个接口地址就能播放，比如公共接口或你自己的。</span></div><button class="btn pri" id="setupb">去设置</button></div>`);
+    $("#setupb").onclick = () => openSettings(); }).catch(() => {});
   app.innerHTML = `<section class="hero" id="hero"><div class="slide on"><div class="txt"><div class="skel" style="height:40px;width:260px;margin-bottom:12px"></div></div></div></section>
   ${hist.length ? `<section class="row"><div class="row-h"><h3>继续观看</h3><a href="#/history">全部</a></div><div class="scroller">${hist.map((h, _i) => card({ _i, title: h.title, pic: h.pic, href: h.href, ep: h.epName ? `看到 ${h.epName}` : "", prog: h.dur ? Math.min(100, h.t / h.dur * 100) : 0, s: h.year })).join("")}</div></section>` : ""}
   ${ROWS.map((r, i) => `<section class="row"><div class="row-h"><h3>${r[0]}</h3><a href="#/more/${r[1]}/${enc(r[2])}/${enc(r[3])}/${enc(r[0])}">更多</a></div><div class="scroller" id="row${i}">${skelRow(8)}</div></section>`).join("")}`;
@@ -143,11 +146,66 @@ function historyPage() {
 /* ---------- 源状态 ---------- */
 async function sitesPage() {
   const { sites, status } = await J("/api/sites");
-  app.innerHTML = `<div class="pagehead"><h2>影视源状态</h2></div><div class="srcstat" style="margin-bottom:12px">上次检测 ${esc(status.last_run || "—")} · 候选 ${status.candidates ?? "—"} · 有效 ${status.valid ?? sites.length} · 每天 04:00 自动检测</div>
-  <button class="btn sec" id="rf" style="margin-bottom:16px">立即重新检测</button>
-  <table class="tbl"><tr><th>#</th><th>名称</th><th>延迟</th><th>片量</th></tr>${sites.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${s.latency}ms</td><td>${s.total || "—"}</td></tr>`).join("")}</table>`;
-  $("#rf").onclick = async () => { await fetch("/api/refresh", { method: "POST" }); toast("已开始检测，几分钟后刷新查看"); };
+  const ok = sites.filter(x => x.ok !== false).length;
+  app.innerHTML = `<div class="pagehead"><h2>影视源状态</h2></div><div class="srcstat" style="margin-bottom:12px">上次检测 ${esc(status.last_run || "—")} · 共 ${sites.length} · 能通 ${ok} · 不通 ${sites.length - ok} · 每天 04:00 自动测速（不通的不删除，只排在后面）</div>
+  <div style="display:flex;gap:10px;margin-bottom:16px"><button class="btn sec" id="rf">立即重新检测</button><button class="btn sec" id="cf">接口设置</button></div>
+  ${sites.length ? `<table class="tbl"><tr><th>#</th><th>名称</th><th>延迟</th><th>片量</th></tr>${sites.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td>${s.ok === false ? `<td class="dead">不通</td><td class="dead">—</td>` : `<td>${s.latency}ms</td><td>${s.total || "—"}</td>`}</tr>`).join("")}</table>` : `<div class="empty">还没有影视源，先在设置里填接口</div>`}`;
+  $("#rf").onclick = async () => { const r = await fetch("/api/refresh", { method: "POST" }).then(r => r.json()).catch(() => ({})); toast(r.ok ? "已开始检测，几分钟后刷新查看" : (r.msg || "失败")); if (!r.ok) openSettings(); };
+  $("#cf").onclick = () => openSettings();
 }
+
+/* ---------- 设置（接口名称和地址，全家共用） ---------- */
+async function openSettings() {
+  let bg = $(".sheet-bg"); if (!bg) { document.body.insertAdjacentHTML("beforeend", `<div class="sheet-bg"></div><div class="sheet"></div>`); bg = $(".sheet-bg"); }
+  const sh = $(".sheet"); sh.classList.add("cfg");
+  const close = () => { bg.classList.remove("on"); sh.classList.remove("on"); setTimeout(() => sh.classList.remove("cfg"), 300); };
+  bg.onclick = close;
+  const post = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) }).then(r => r.json()).catch(() => ({ ok: false, msg: "请求失败" }));
+  const st = await J("/api/conf");
+  if (!st.authed) {
+    const first = !st.has_password;
+    sh.innerHTML = `<div class="grab"></div><h4>${first ? "设置管理密码" : "设置"}</h4>
+      <p class="d">${first ? (st.lan ? "首次使用，先设一个管理密码（全家共用，至少 4 位）。之后在这里填影视源接口。" : "首次设置密码请在家里局域网内打开本页。") : "输入管理密码后可修改影视源接口。"}</p>
+      <input class="in" type="password" id="cpw" placeholder="密码" autocomplete="${first ? "new-password" : "current-password"}">
+      <div class="foot"><button class="btn pri" id="clg">${first ? "设置并继续" : "进入"}</button></div><div class="msg" id="cmsg" style="font-size:13px;color:#ff6b6b"></div>`;
+    const go_ = async () => { const r = await post("/api/conf/login", { password: $("#cpw").value }); if (r.ok) openSettings(); else $("#cmsg").textContent = r.msg || "失败"; };
+    $("#clg").onclick = go_; $("#cpw").onkeydown = e => { if (e.key === "Enter") go_(); };
+    requestAnimationFrame(() => { bg.classList.add("on"); sh.classList.add("on"); setTimeout(() => $("#cpw") && $("#cpw").focus(), 300); });
+    return;
+  }
+  let list = (st.interfaces || []).map(x => ({ ...x }));
+  const draw = () => {
+    sh.innerHTML = `<div class="grab"></div><h4>影视源接口</h4>
+      <p class="d">CineNest 本身不带片源。填一个或多个接口地址，启用的会合并去重，并在本机测速，连不上的自动排后。支持 CineNest、TVBox、MoonTV 格式和每行“名称,地址”的文本。</p>
+      <div id="iflist">${list.map((it, i) => `<div class="if${it.on === false ? " off" : ""}" data-i="${i}">
+        <input class="in n" placeholder="名称，如 我的接口" value="${esc(it.name || "")}">
+        <div class="ops"><button class="mini${it.on === false ? "" : " on"}" data-a="on">${it.on === false ? "已停用" : "启用中"}</button><button class="mini" data-a="test">测试</button><button class="mini" data-a="del">删除</button></div>
+        <input class="in u" placeholder="接口地址 https://…" value="${esc(it.url || "")}" inputmode="url" autocapitalize="off" spellcheck="false">
+        <div class="msg"></div></div>`).join("") || `<div class="empty" style="padding:18px 0">还没有接口</div>`}</div>
+      <div class="row2"><button class="mini" id="add">＋ 添加接口</button>${list.some(x => x.url === st.public) ? "" : `<button class="mini" id="pub">＋ 填入公共接口</button>`}</div>
+      <h5>GitHub 代理（可选）</h5><input class="in" id="ghp" placeholder="如 https://9797.cc.cd/ ，接口在 GitHub 上连不上时使用" value="${esc(st.gh_proxy || "")}" inputmode="url" autocapitalize="off" spellcheck="false">
+      <div class="foot"><button class="btn pri" id="sv">保存并测速</button><button class="btn sec" id="ss">影视源状态</button></div>
+      <h5>管理密码</h5><div style="display:flex;gap:8px"><input class="in" type="password" id="np" placeholder="新密码（至少 4 位）" autocomplete="new-password"><button class="mini" id="cp">修改</button><button class="mini" id="lo">退出</button></div>`;
+    const sync = () => { if ($("#ghp")) st.gh_proxy = $("#ghp").value.trim(); $$(".if", sh).forEach(r => { const i = +r.dataset.i; list[i].name = $(".n", r).value.trim(); list[i].url = $(".u", r).value.trim(); }); };
+    $$(".if", sh).forEach(r => $$(".mini", r).forEach(b => b.onclick = async () => {
+      sync(); const i = +r.dataset.i, a = b.dataset.a;
+      if (a === "del") { list.splice(i, 1); draw(); }
+      else if (a === "on") { list[i].on = list[i].on === false; draw(); }
+      else if (a === "test") { const m = $(".msg", r); m.className = "msg"; m.textContent = "拉取中…"; const t = await post("/api/conf/test", { url: list[i].url, gh_proxy: $("#ghp").value.trim() });
+        m.className = "msg " + (t.ok ? "ok" : "bad"); m.textContent = t.ok ? `识别到 ${t.count} 个影视源${t.via ? "（经加速镜像）" : ""}` : (t.msg || "失败"); }
+    }));
+    $("#add").onclick = () => { sync(); list.push({ name: "", url: "", on: true }); draw(); const l = $$(".if .n", sh).pop(); l && l.focus(); };
+    if ($("#pub")) $("#pub").onclick = () => { sync(); list.push({ name: "CineNest 公共接口", url: st.public, on: true }); draw(); };
+    $("#sv").onclick = async e => { sync(); e.target.disabled = true; const r = await post("/api/conf/save", { interfaces: list, gh_proxy: $("#ghp").value.trim() }); e.target.disabled = false;
+      if (r.ok) { toast("已保存，正在测速，约 1–3 分钟后生效"); close(); } else toast(r.msg || "保存失败"); };
+    $("#ss").onclick = () => { close(); go("#/sites"); };
+    $("#cp").onclick = async () => { const v = $("#np").value; const r = await post("/api/conf/save", { new_password: v }); toast(r.ok ? "密码已修改" : (r.msg || "失败")); if (r.ok) $("#np").value = ""; };
+    $("#lo").onclick = async () => { await post("/api/conf/logout"); close(); toast("已退出"); };
+  };
+  draw();
+  requestAnimationFrame(() => { bg.classList.add("on"); sh.classList.add("on"); });
+}
+$("#gear").onclick = () => openSettings();
 
 /* ---------- 详情 ---------- */
 async function detailDouban(tok, type, id, autoplay) {
@@ -587,7 +645,7 @@ class Player {
   }
   sheet() {
     let bg = $(".sheet-bg"); if (!bg) { document.body.insertAdjacentHTML("beforeend", `<div class="sheet-bg"></div><div class="sheet"></div>`); bg = $(".sheet-bg"); }
-    const sh = $(".sheet");
+    const sh = $(".sheet"); sh.classList.remove("cfg");
     const close = () => { bg.classList.remove("on"); sh.classList.remove("on"); };
     sh.innerHTML = `<div class="grab"></div><h4>选择线路</h4><div class="srow auto${this.auto ? " on" : ""}" data-i="-1"><span>自动选择</span><small>测速选最快，直连不通或卡顿自动换源</small></div>${this.sources.map((s, i) => `<div class="srow${!this.auto && i === this.si ? " on" : i === this.si ? " cur" : ""}${this.bad.has(i) ? " bad" : ""}" data-i="${i}"><span>${esc(s.site)}</span><small>${s.groups[0].eps.length > 1 ? s.groups[0].eps.length + " 集" : ""} ${esc(s.remarks || "")}</small><span class="sp"></span>${s.pres || s.res ? `<small>${(h => h >= 2000 ? "4K" : h >= 1400 ? "2K" : h >= 1000 ? "1080P" : h >= 700 ? "720P" : h + "P")(s.pres || s.res)}</small>` : ""}<small>${(v => v == null ? (this.probing() ? "测速中" : "") : v < 0 ? "不通" : v <= 1 ? "很慢" : fmtBps(v))(this.spd.get(s.api))}</small></div>`).join("")}
       <label class="switch"><span>自动去除插播广告</span><input type="checkbox" id="noad" ${localStorage.noad === "0" ? "" : "checked"}></label>`;
