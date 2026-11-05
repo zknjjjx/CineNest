@@ -239,6 +239,13 @@ async def run_once():
               "seconds": round(time.time() - started, 1), "upstreams": up_stats}
     json.dump(status, open(os.path.join(DATA, "status.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     log(f"完成：候选 {len(cands)}，有效 {len(valid)}，用时 {status['seconds']}s")
+    try:
+        import tvbox
+        r = await tvbox.auto_push()
+        if r:
+            log("TVBox 接口：", r.get("msg"))
+    except Exception as e:
+        log("TVBox 推送出错", e)
 
 
 def seconds_until(hhmm):

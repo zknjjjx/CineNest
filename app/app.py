@@ -938,6 +938,115 @@ async def api_shorts(req):
     more = any(int(r.get("pagecount") or 1) > pg for r in res if r)
     return web.json_response({"items": items, "more": more})
 
+import tvbox
+
+ADMIN_COOKIE = "cn_admin"
+
+
+def _is_lan(req):
+    # 经 Cloudflare 隧道进来的请求带 CF 头；只允许局域网首次设置密码
+    return not (req.headers.get("CF-Connecting-IP") or req.headers.get("CF-Ray"))
+
+
+def _authed(req, d=None):
+    d = d or tvbox.load()
+    return tvbox.check_session(d, req.cookies.get(ADMIN_COOKIE))
+
+
+async def admin_page(req):
+    return web.FileResponse(os.path.join(STATIC, "admin.html"),
+                            headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+
+
+async def api_admin_state(req):
+    d = tvbox.load()
+    ok = _authed(req, d)
+    r = {"authed": ok, "has_password": bool(d.get("pw_hash")), "lan": _is_lan(req)}
+    if ok:
+        r["settings"] = tvbox.public_view(d)
+        r["count"] = len(tvbox.build_config(d)["sites"])
+        try:
+            r["collector"] = json.load(open(os.path.join(DATA, "status.json"), encoding="utf-8"))
+            r["collector"].pop("upstreams", None)
+        except Exception:
+            pass
+    return web.json_response(r)
+
+
+async def api_admin_login(req):
+    b = await req.json()
+    pw = (b.get("password") or "").strip()
+    d = tvbox.load()
+    if not d.get("pw_hash"):
+        if not _is_lan(req):
+            return web.json_response({"ok": False, "msg": "首次设置密码请在局域网内访问"}, status=403)
+        if len(pw) < 6:
+            return web.json_response({"ok": False, "msg": "密码至少 6 位"}, status=400)
+        tvbox.set_password(d, pw); tvbox.save(d)
+    elif not tvbox.check_password(d, pw):
+        await asyncio.sleep(1.5)
+        return web.json_response({"ok": False, "msg": "密码不对"}, status=401)
+    resp = web.json_response({"ok": True})
+    resp.set_cookie(ADMIN_COOKIE, tvbox.make_session(d), max_age=30 * 86400, httponly=True,
+                    samesite="Strict", secure=is_https(req), path="/")
+    return resp
+
+
+async def api_admin_logout(req):
+    resp = web.json_response({"ok": True})
+    resp.del_cookie(ADMIN_COOKIE, path="/")
+    return resp
+
+
+async def api_admin_save(req):
+    d = tvbox.load()
+    if not _authed(req, d):
+        return web.json_response({"ok": False, "msg": "未登录"}, status=401)
+    b = await req.json()
+    for k in ("repo", "branch", "path", "title", "commit_msg"):
+        if k in b:
+            d[k] = str(b[k] or "").strip()[:200]
+    if d["repo"] and not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", d["repo"]):
+        return web.json_response({"ok": False, "msg": "仓库格式应为 用户名/仓库名"}, status=400)
+    for k in ("auto_push", "include_adult", "create_repo"):
+        if k in b:
+            d[k] = bool(b[k])
+    if b.get("token"):
+        d["token"] = str(b["token"]).strip()
+    if b.get("clear_token"):
+        d["token"] = ""
+    if b.get("new_password"):
+        if len(b["new_password"]) < 6:
+            return web.json_response({"ok": False, "msg": "新密码至少 6 位"}, status=400)
+        tvbox.set_password(d, b["new_password"])
+    tvbox.save(d)
+    resp = web.json_response({"ok": True, "settings": tvbox.public_view(d)})
+    if b.get("new_password"):
+        resp.set_cookie(ADMIN_COOKIE, tvbox.make_session(d), max_age=30 * 86400, httponly=True,
+                        samesite="Strict", secure=is_https(req), path="/")
+    return resp
+
+
+async def api_admin_push(req):
+    if not _authed(req):
+        return web.json_response({"ok": False, "msg": "未登录"}, status=401)
+    last = await tvbox.push(force=True, session=req.app["session"])
+    return web.json_response({"ok": last.get("ok"), "last": last})
+
+
+async def api_admin_refresh(req):
+    if not _authed(req):
+        return web.json_response({"ok": False, "msg": "未登录"}, status=401)
+    open(os.path.join(DATA, "trigger"), "w").write(str(time.time()))
+    return web.json_response({"ok": True})
+
+
+async def tvbox_json(req):
+    """本机直接提供同一份接口，局域网电视也可直接用 http://N1:8890/tvbox.json"""
+    return web.Response(text=tvbox.render(tvbox.build_config()), content_type="application/json",
+                        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "no-cache"})
+
+
 async def index(req):
     return web.FileResponse(os.path.join(STATIC, "index.html"), headers={"Cache-Control": "no-cache"})
 
@@ -1009,6 +1118,14 @@ app.router.add_get("/api/resolve", api_resolve)
 app.router.add_post("/api/learn", api_learn)
 app.router.add_get("/api/learned", api_learned)
 app.router.add_post("/api/pres", api_pres)
+app.router.add_get("/admin", admin_page)
+app.router.add_get("/api/admin/state", api_admin_state)
+app.router.add_post("/api/admin/login", api_admin_login)
+app.router.add_post("/api/admin/logout", api_admin_logout)
+app.router.add_post("/api/admin/save", api_admin_save)
+app.router.add_post("/api/admin/push", api_admin_push)
+app.router.add_post("/api/admin/refresh", api_admin_refresh)
+app.router.add_get("/tvbox.json", tvbox_json)
 app.router.add_static("/static", STATIC)
 
 if __name__ == "__main__":

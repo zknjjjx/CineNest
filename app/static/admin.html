@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0b0c10">
+<title>CineNest 设置</title>
+<link rel="stylesheet" href="/static/fonts.css?v=1">
+<style>
+:root{--bg:#0b0c10;--bg2:#13151b;--card:#1a1d25;--line:rgba(255,255,255,.08);--tx:#f2f3f5;--sub:#9aa0ab;--mute:#666c78;--ac:#ff5a36;--ac2:#ffb547;--ok:#3ecf8e;--bad:#ff6b6b;--r:14px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--tx)}
+body{font:15px/1.6 "Inter Variable","Noto Sans SC Variable",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;
+  background:radial-gradient(900px 500px at 85% -10%,rgba(255,90,54,.16),transparent 60%),radial-gradient(700px 500px at -10% 110%,rgba(255,181,71,.08),transparent 60%),var(--bg);
+  padding:calc(24px + env(safe-area-inset-top)) 16px calc(40px + env(safe-area-inset-bottom))}
+.wrap{max-width:720px;margin:0 auto;animation:up .5s cubic-bezier(.2,.8,.2,1)}
+@keyframes up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+h1{font-size:22px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+h1 i{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:grid;place-items:center;box-shadow:0 6px 20px rgba(255,90,54,.35)}
+h1 i svg{width:16px;fill:#fff}
+.lead{color:var(--sub);margin:0 0 22px;font-size:14px}
+.card{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent),var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 14px;color:var(--tx);font-weight:600}
+label{display:block;font-size:13px;color:var(--sub);margin:12px 0 6px}
+input[type=text],input[type=password]{width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:10px 12px;font:inherit;outline:none;transition:border .2s,box-shadow .2s}
+input:focus{border-color:rgba(255,90,54,.6);box-shadow:0 0 0 3px rgba(255,90,54,.15)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.row{grid-template-columns:1fr}}
+.sw{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+.sw:first-of-type{border-top:0}
+.sw small{display:block;color:var(--mute);font-size:12px}
+.tg{position:relative;width:44px;height:26px;flex:none}
+.tg input{opacity:0;width:0;height:0}
+.tg span{position:absolute;inset:0;background:#2a2e38;border-radius:20px;transition:.25s}
+.tg span:after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.25s}
+.tg input:checked+span{background:linear-gradient(135deg,var(--ac),var(--ac2))}
+.tg input:checked+span:after{transform:translateX(18px)}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+button{font:inherit;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;color:var(--tx);background:#252934;transition:transform .15s,filter .2s}
+button:hover{filter:brightness(1.15)}button:active{transform:scale(.97)}
+button.pri{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;font-weight:600;box-shadow:0 6px 18px rgba(255,90,54,.3)}
+button:disabled{opacity:.5;pointer-events:none}
+.url{display:flex;gap:8px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 12px;margin-top:8px}
+.url code{flex:1;font-size:12.5px;color:var(--ac2);word-break:break-all;font-family:ui-monospace,Menlo,monospace}
+.url button{padding:6px 10px;font-size:12px}
+.url em{font-style:normal;font-size:11px;color:var(--mute);flex:none;width:52px}
+.stat{display:flex;gap:10px;flex-wrap:wrap}
+.pill{background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px;color:var(--sub)}
+.pill b{color:var(--tx);font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--mute)}
+.dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}.dot.bad{background:var(--bad)}
+.msg{font-size:13px;color:var(--sub);margin-top:10px}
+.hint{font-size:12px;color:var(--mute);margin-top:6px;line-height:1.5}
+.hint a{color:var(--ac2)}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translate(-50%,20px);opacity:0;background:#2a2e38;border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:14px;transition:.3s;pointer-events:none;z-index:9}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+.login{max-width:360px;margin:12vh auto 0}
+.hide{display:none!important}
+.back{color:var(--sub);font-size:13px;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← 回到影巢</a>
+  <div id="login" class="login hide">
+    <div class="card">
+      <h1><i><svg viewBox="0 0 24 24"><path d="M9 7.5v9l7.5-4.5z"/></svg></i><span id="lt">管理登录</span></h1>
+      <p class="lead" id="ld">请输入管理密码</p>
+      <input type="password" id="pw" placeholder="密码" autocomplete="current-password">
+      <div class="btns"><button class="pri" id="lb">进入</button></div>
+      <div class="msg" id="lm"></div>
+    </div>
+  </div>
+
+  <div id="main" class="hide">
+    <h1 style="margin-top:14px"><i><svg viewBox="0 0 24 24"><path d="M9 7.5v9l7.5-4.5z"/></svg></i>TVBox 接口</h1>
+    <p class="lead">每天验活后，把可用的影视源生成 TVBox 配置并推送到 GitHub，电视上填下面的地址即可。</p>
+
+    <div class="card">
+      <h2>状态</h2>
+      <div class="stat">
+        <span class="pill">可用源 <b id="cnt">-</b></span>
+        <span class="pill">上次验活 <b id="lr">-</b></span>
+        <span class="pill"><span class="dot" id="pd"></span>上次推送 <b id="lp">-</b></span>
+      </div>
+      <div class="msg" id="pm"></div>
+      <div class="btns">
+        <button class="pri" id="push">立即推送</button>
+        <button id="refresh">立即重新验活</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>电视上用的地址</h2>
+      <div id="urls"></div>
+      <div class="url"><em>局域网</em><code id="lan"></code><button data-c="lan">复制</button></div>
+      <div class="hint">GitHub 原始地址国内电视可能打不开，优先用“加速”或“jsDelivr”（jsDelivr 有缓存，更新可能晚几小时）。局域网地址实时、无需推送，只在家里能用。</div>
+    </div>
+
+    <div class="card">
+      <h2>推送设置</h2>
+      <label>仓库（用户名/仓库名）</label>
+      <input type="text" id="repo" placeholder="zknjjjx/tvbox">
+      <div class="row">
+        <div><label>分支</label><input type="text" id="branch" placeholder="main"></div>
+        <div><label>文件路径</label><input type="text" id="path" placeholder="tvbox.json"></div>
+      </div>
+      <label>GitHub Token <span id="th" style="color:var(--mute)"></span></label>
+      <input type="password" id="token" placeholder="留空保持不变" autocomplete="off">
+      <div class="hint">需要对该仓库有 Contents 读写权限（Fine-grained token 选该仓库 → Contents: Read and write；若要自动建仓库，用 classic token 勾选 public_repo）。Token 只保存在本机数据目录。 <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">去创建</a></div>
+      <div class="row">
+        <div><label>配置名称</label><input type="text" id="title" placeholder="影巢"></div>
+        <div><label>提交说明</label><input type="text" id="commit_msg" placeholder="更新 TVBox 接口"></div>
+      </div>
+      <div style="margin-top:14px">
+        <div class="sw"><div>每日验活后自动推送<small>源列表没变化时不重复提交</small></div><label class="tg"><input type="checkbox" id="auto_push"><span></span></label></div>
+        <div class="sw"><div>仓库不存在时自动创建<small>创建为公开仓库，电视才能读取</small></div><label class="tg"><input type="checkbox" id="create_repo"><span></span></label></div>
+        <div class="sw"><div>包含成人源<small>默认关闭</small></div><label class="tg"><input type="checkbox" id="include_adult"><span></span></label></div>
+      </div>
+      <div class="btns">
+        <button class="pri" id="save">保存</button>
+        <button id="clr">清除 Token</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>管理密码</h2>
+      <input type="password" id="np" placeholder="新密码（至少 6 位）" autocomplete="new-password">
+      <div class="btns"><button id="cp">修改密码</button><button id="out">退出登录</button></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+const toast=t=>{const e=$('toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2200)};
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json().catch(()=>({ok:false,msg:'请求失败'})));
+let S={};
+async function load(){
+  const r=await fetch('/api/admin/state',{cache:'no-store'}).then(r=>r.json());
+  if(!r.authed){
+    $('main').classList.add('hide');$('login').classList.remove('hide');
+    if(!r.has_password){$('lt').textContent='设置管理密码';$('ld').textContent=r.lan?'首次使用，请设置一个管理密码（至少 6 位）':'首次设置密码请在家里局域网内打开本页';$('lb').textContent='设置并进入';}
+    $('pw').focus();return;
+  }
+  $('login').classList.add('hide');$('main').classList.remove('hide');
+  S=r.settings;
+  for(const k of ['repo','branch','path','title','commit_msg'])$(k).value=S[k]||'';
+  for(const k of ['auto_push','create_repo','include_adult'])$(k).checked=!!S[k];
+  $('th').textContent=S.token_set?('· 已设置 '+S.token_hint):'· 未设置';
+  $('cnt').textContent=r.count;
+  $('lr').textContent=r.collector?r.collector.last_run:'-';
+  const L=S.last||{};
+  $('lp').textContent=L.time||'从未';$('pd').className='dot '+(L.time?(L.ok?'ok':'bad'):'');
+  $('pm').textContent=L.msg?('结果：'+L.msg+(L.commit?'（'+L.commit+'）':'')):'';
+  const u=[['加速',S.mirror_url],['jsDelivr',S.cdn_url],['GitHub',S.raw_url]].filter(x=>x[1]);
+  $('urls').innerHTML=u.length?u.map(([n,v],i)=>`<div class="url"><em>${n}</em><code id="u${i}">${v}</code><button data-c="u${i}">复制</button></div>`).join(''):'<div class="hint">填好仓库并推送后，这里会出现地址。</div>';
+  $('lan').textContent=location.origin+'/tvbox.json';
+}
+document.addEventListener('click',e=>{const c=e.target.dataset&&e.target.dataset.c;if(!c)return;const t=$(c).textContent;
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('已复制'),()=>{const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast('已复制')})});
+async function login(){const r=await post('/api/admin/login',{password:$('pw').value});if(r.ok){$('pw').value='';load()}else $('lm').textContent=r.msg||'失败'}
+$('lb').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login()};
+$('save').onclick=async()=>{const b={};for(const k of ['repo','branch','path','title','commit_msg'])b[k]=$(k).value;for(const k of ['auto_push','create_repo','include_adult'])b[k]=$(k).checked;if($('token').value)b.token=$('token').value;
+  const r=await post('/api/admin/save',b);if(r.ok){$('token').value='';toast('已保存');load()}else toast(r.msg||'保存失败')};
+$('clr').onclick=async()=>{if(!confirm('清除已保存的 Token？'))return;const r=await post('/api/admin/save',{clear_token:true});r.ok?(toast('已清除'),load()):toast(r.msg)};
+$('push').onclick=async e=>{e.target.disabled=true;e.target.textContent='推送中…';const r=await post('/api/admin/push');e.target.disabled=false;e.target.textContent='立即推送';toast((r.last&&r.last.msg)||r.msg||'完成');load()};
+$('refresh').onclick=async()=>{const r=await post('/api/admin/refresh');toast(r.ok?'已开始验活，约 2 分钟后完成并自动推送':(r.msg||'失败'))};
+$('cp').onclick=async()=>{const v=$('np').value;if(v.length<6)return toast('至少 6 位');const r=await post('/api/admin/save',{new_password:v});if(r.ok){$('np').value='';toast('密码已修改')}else toast(r.msg)};
+$('out').onclick=async()=>{await post('/api/admin/logout');load()};
+load();
+</script>
+</body>
+</html>
