@@ -99,7 +99,7 @@ const navKey = (kind, cat, type) => ["movie", "tv", "anime", "show"][CHIPS.index
 async function more(tok, kind, cat, type, title) {
   const chips = chipGroup(kind, cat, type), gname = ["电影", "剧集", "动漫", "综艺"][CHIPS.indexOf(chips)];
   const inGroup = chips.some(c => c[0] === kind && c[1] === cat && c[2] === type);
-  app.innerHTML = `<div class="pagehead"><h2>${esc(inGroup && title !== gname ? gname : title)}</h2></div><div class="chips" style="margin-bottom:18px">${chips.map(c => `<a class="chip${c[0] === kind && c[1] === cat && c[2] === type ? " on" : ""}" href="#/more/${c[0]}/${enc(c[1])}/${enc(c[2])}/${enc(c[3])}">${esc(c[3])}</a>`).join("")}</div><div class="grid" id="g">${skelRow(12)}</div><div id="sent" class="loading"></div>`;
+  app.innerHTML = `<div class="pagehead ph2"><h2>${esc(inGroup && title !== gname ? gname : title)}</h2><div class="chips">${chips.map(c => `<a class="chip${c[0] === kind && c[1] === cat && c[2] === type ? " on" : ""}" href="#/more/${c[0]}/${enc(c[1])}/${enc(c[2])}/${enc(c[3])}">${esc(c[3])}</a>`).join("")}</div></div><div class="grid" id="g">${skelRow(12)}</div><div id="sent" class="loading"></div>`;
   let start = 0, busy = false, end = false; const g = $("#g");
   const con = $(".chip.on"); if (con) con.parentElement.scrollLeft = con.offsetLeft - 16;
   const load = async () => {

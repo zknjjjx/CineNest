@@ -91,6 +91,7 @@ main{max-width:1440px;margin:0 auto;padding:0 28px 60px}
 .pagehead{display:flex;align-items:center;gap:12px;margin:24px 0 16px;flex-wrap:wrap}
 .pagehead h2{margin:0;font-size:24px}
 .chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}.chips::-webkit-scrollbar{display:none}
+.pagehead.ph2{flex-wrap:nowrap;gap:18px;margin-bottom:18px}.pagehead.ph2 h2{flex:none}.pagehead.ph2 .chips{flex:1;min-width:0;position:relative;padding:2px 0}
 .chip{flex:none;padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.06);color:var(--sub);font-size:13.5px;border:1px solid transparent;transition:.2s}
 .chip.on{background:rgba(255,90,54,.14);color:#ff8a6a;border-color:rgba(255,90,54,.35)}
 .loading,.empty{color:var(--mute);text-align:center;padding:60px 0;font-size:14px}
