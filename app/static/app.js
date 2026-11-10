@@ -402,71 +402,6 @@ async function speedTest(epUrl, budget, cap) {
 }
 const fmtBps = b => !b ? "" : b >= 1048576 ? (b / 1048576).toFixed(1) + " MB/s" : Math.round(b / 1024) + " KB/s";
 
-/* 多路拉源（hls.js 才有；iPhone 原生播放器只能单路）：播放器拉第 N 段时，后台同时拉 N+1、N+2。
-   采集站多按单条连接限速，三路能快两三倍。考虑手机流量与内存，比电视版（5 路、领先 10 分钟）保守：3 路，只领先两段 */
-const MB = 1048576, LANES = 3;
-const hostOf = u => { const m = /^https?:\/\/([^\/:?#]+)/i.exec(u || ""); return m ? m[1].toLowerCase() : ""; };
-const crowdMap = () => { try { const o = JSON.parse(localStorage.crowd || "{}"), t = Date.now(), r = {}; for (const k in o) if (t - o[k] < 7 * 864e5) r[k] = o[k]; return r; } catch (e) { return {}; } };
-const isCrowd = u => !!crowdMap()[hostOf(u)];
-const markCrowd = u => { const h = hostOf(u); if (!h) return; const o = crowdMap(); o[h] = Date.now(); try { localStorage.crowd = JSON.stringify(o); } catch (e) { } };
-class Pref {
-  constructor(P, lanes) { this.P = P; this.lanes = lanes; this.m = new Map(); this.rej = []; }
-  ahead(frag) {
-    if (this.lanes < 2 || !frag || !this.P.hls) return;
-    const lv = this.P.hls.levels && this.P.hls.levels[frag.level], d = lv && lv.details; if (!d) return;
-    const fr = d.fragments, i = fr.indexOf(frag); if (i < 0) return;
-    const keep = new Set();
-    for (let k = 1; k < this.lanes; k++) { const f = fr[i + k]; if (!f || f.byteRangeEndOffset) continue; keep.add(f.url); if (!this.m.has(f.url)) this.m.set(f.url, this.get(f.url)); }
-    for (const [u, e] of this.m) if (!keep.has(u) && u !== frag.url) { e.ctl.abort(); this.m.delete(u); }   // 快进或换段后不再需要的停掉，内存只留几段
-  }
-  get(u) {
-    const ctl = new AbortController(), e = { ctl, t0: performance.now(), t1: 0 };
-    e.p = (async () => {
-      const r = await fetch(u, { signal: ctl.signal });
-      if (!r.ok) { if ([403, 429, 503, 509].includes(r.status)) this.reject(); throw new Error("http " + r.status); }
-      const rd = r.body.getReader(), parts = []; let n = 0;
-      for (; ;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); n += value.length; this.P._data = Date.now(); }
-      const out = new Uint8Array(n); let o = 0; for (const c of parts) { out.set(c, o); o += c.length; }
-      e.t1 = performance.now(); return out.buffer;
-    })();
-    e.p.catch(() => { });
-    return e;
-  }
-  take(u) { const e = this.m.get(u); if (e) this.m.delete(u); return e; }
-  // 一分钟内被拒两次（像是嫌连接多）：3 路 → 2 路 → 1 路，并记住这个站 7 天
-  reject() {
-    const n = Date.now(); this.rej = this.rej.filter(t => n - t < 60000); this.rej.push(n);
-    if (this.rej.length < 2 || this.lanes <= 1) return;
-    this.rej = []; this.lanes--; this.P._crowd = true; markCrowd(this.P._epUrl);
-  }
-  stop() { for (const e of this.m.values()) e.ctl.abort(); this.m.clear(); this.lanes = 0; }
-}
-function prefLoader(P) {
-  const Base = Hls.DefaultConfig.loader;
-  return class extends Base {
-    loadprogress(e) { super.loadprogress(e); P._data = Date.now(); }
-    load(ctx, cfg, cb) {
-      const pf = P._pf, f = ctx.frag;
-      if (pf && f && f.sn !== "initSegment" && !ctx.rangeEnd) {
-        pf.ahead(f);
-        const e = pf.take(ctx.url);
-        if (e) {
-          const st = this.stats; st.loading.start = e.t0;
-          e.p.then(buf => {
-            if (this._ab) return;
-            st.loading.first = st.loading.end = e.t1 || performance.now(); st.loaded = st.total = buf.byteLength;
-            cb.onSuccess({ url: ctx.url, data: buf }, st, ctx, null);
-          }, () => { if (!this._ab) { st.loading.start = 0; super.load(ctx, cfg, cb); } });
-          return;
-        }
-      }
-      super.load(ctx, cfg, cb);
-    }
-    abort() { this._ab = true; super.abort(); }
-    destroy() { this._ab = true; super.destroy(); }
-  };
-}
-
 /* ---------- 播放器：自动模式测速选最快源，直连不通/卡顿就换源；手选模式直连不通才中转 ---------- */
 class Player {
   constructor(tok, meta, key) { Object.assign(this, { tok, meta, key, sources: [], si: 0, ei: 0, proxy: false, auto: true, spd: new Map(), bad: new Set(), rbad: new Set(), hls: null, started: false, resolved: false }); }
@@ -592,21 +527,10 @@ class Player {
     if (!epName) this.ei = ei;
     const best = this.rank()[0]; if (best != null) this.si = best;
   }
-  // 档位：1080 够快 > 720/未知 够快 > 其余能通 > 没测的 > 不通。同档按单路测速快慢。
-  // 能多路拉（hls.js）时门槛放低：1080 单路 0.3、720 单路 0.2 MB/s；iPhone 原生只能单路，仍要 0.9 / 0.45；
-  // 嫌连接多的站（7 天内被拒过）的 1080 也要 0.9，否则排到 720 后面
-  tier(s) {
-    const v = this.spd.get(s.api); if (v == null) return 1; if (v < 0) return 0;
-    const h = s.pres || s.res || 0, multi = !NATIVE_HLS() && !this.proxy, u = s.groups[0].eps[0]?.url || "";
-    let r = h >= 1000 ? 3 : (h >= 700 || !h) ? 2 : 1;
-    if (r === 3 && v < (multi && !isCrowd(u) ? 0.3 : 0.9) * MB) r = 1;
-    if (r === 2 && v < (multi ? 0.2 : 0.45) * MB) r = 1;
-    return r + 1;
-  }
-  rank(skip) {
-    const sc = s => { const v = this.spd.get(s.api); return this.tier(s) * 1e10 + (v > 0 ? v : 0); };
+  rank(skip) { // 可用线路按测速排序：测过且通的按速度，没测的随后（保持原顺序），测过不通的最后
+    const sc = s => { const v = this.spd.get(s.api); return v == null ? 0 : v < 0 ? -1 : 1 + v; };
     return this.sources.map((s, k) => k).filter(k => !(skip || this.bad).has(k) && this.sources[k].groups[0].eps.length > this.ei)
-      .sort((a, b) => sc(this.sources[b]) - sc(this.sources[a]) || a - b);
+      .sort((a, b) => { const x = sc(this.sources[a]), y = sc(this.sources[b]); return (y > 0) - (x > 0) || (x < 0) - (y < 0) || y - x || a - b; });
   }
   ensurePlayer() {
     if ($("#pwrap")) return $("#pv");
@@ -647,46 +571,26 @@ class Player {
     const url = /\.m3u8/i.test(ep.url) ? `/m3u8?url=${enc(ep.url)}${this.proxy ? "&proxy=1" : ""}${localStorage.noad === "0" ? "&noad=0" : ""}` : ((this.proxy || mixed) ? `/seg?url=${enc(ep.url)}` : ep.url);
     let ok = false;
     const fail = why => { if (this._failing) return; this._failing = true; setTimeout(() => this._failing = false, 500); this.failover(why, v.currentTime > 1 ? v.currentTime : at); };
-    const isM3u8 = /\.m3u8/i.test(ep.url);
-    const nativeHls = !!v.canPlayType("application/vnd.apple.mpegurl") && (IS_IOS || IS_SAFARI || !(window.Hls && Hls.isSupported()));
-    const useHls = isM3u8 && !nativeHls && window.Hls && Hls.isSupported();
-    // 看「有没有进账」判断（hls.js 才知道字节进度）：自动模式起播 8 秒一个字节没收到就换，有数据最多等 15 秒；
-    // 卡顿 8 秒没进账就换（刚拖过进度条放宽到 12 秒），有进账最多等 40 秒。比电视版（6/12、5/30 秒）宽松，手机网络抖动多
-    this._epUrl = ep.url; this._data = 0; this._crowd = false; this._seekAt = 0; this._t0 = Date.now();
-    this._pf = useHls ? new Pref(this, this.proxy ? 1 : LANES) : null;
-    const maxStart = this.auto && !this.proxy ? (useHls ? 15000 : 12000) : REMOTE ? 25000 : 15000;
-    const dog = () => {
-      if (!this.alive() || this._failing) return;
-      const n = Date.now();
-      if (!ok) {
-        if (useHls && this.auto && !this.proxy && n - Math.max(this._t0, this._data) >= 8000) { fail("片源没响应"); return; }
-        if (n - this._t0 >= maxStart) { fail("连接超时"); return; }
-      } else if (useHls && this.auto && !this.stuck && this._bufAt) {
-        const quiet = n - Math.max(this._bufAt, this._data);
-        if (quiet >= (n - this._seekAt < 12000 ? 12000 : 8000) || n - this._bufAt >= 40000) { fail("卡顿"); return; }
-      }
-      this.watch = setTimeout(dog, 1000);
-    };
-    this.watch = setTimeout(dog, 1000);
+    this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, this.auto && !this.proxy ? 12000 : REMOTE ? 25000 : 15000);
     this._relay = this.proxy || mixed; this._bw = 0; this._okAt = 0; this._stalls = []; this.showInfo(); this.infoT = setInterval(() => this.showInfo(), 1500);
-    const onPlaying = () => { if (!this._okAt) this._okAt = Date.now(); ok = true; this._bufAt = 0; clearTimeout(this.stall); this.mask(""); };
-    v.onseeking = () => { this._seekAt = Date.now(); };
+    const onPlaying = () => { if (!this._okAt) this._okAt = Date.now(); ok = true; clearTimeout(this.watch); clearTimeout(this.stall); this.mask(""); };
     v.onplaying = onPlaying;
     // 自动模式：一次缓冲超过 8 秒，或 90 秒内卡 3 次，就换下一条线路；手选模式不因卡顿换源
     v.onwaiting = () => { if (!ok) return; this.mask("缓冲中…"); clearTimeout(this.stall); if (!this.auto || this.stuck || v.seeking) return;
       const n = Date.now(); this._stalls = this._stalls.filter(t => n - t < 90000); this._stalls.push(n);
       if (this._stalls.length >= 3 && n - this._okAt > 5000) { fail("卡顿"); return; }
-      if (useHls) { this._bufAt = n; return; }   // hls.js：交给上面按进账判断
       this.stall = setTimeout(() => fail("卡顿"), REMOTE ? 8000 : 6000); };
-    v.ontimeupdate = () => { if (ok) { clearTimeout(this.stall); this._bufAt = 0; if (!v.seeking) this.mask(""); this.save(v); this.crowdCheck(v); } };
+    v.ontimeupdate = () => { if (ok) { clearTimeout(this.stall); if (!v.seeking) this.mask(""); this.save(v); } };
     v.onended = () => { if (this.ei + 1 < this.eps().length) this.play(this.ei + 1, 0); };
     const begin = () => {
       if (at > 3) { try { v.currentTime = at; } catch (e) { } }
       const p = v.play();
-      if (p && p.catch) p.catch(err => { if (err && err.name === "NotAllowedError") { clearTimeout(this.watch); this.mask(""); toast("点一下画面开始播放"); v.addEventListener("play", () => { if (!ok) { this._t0 = Date.now(); this._data = 0; clearTimeout(this.watch); this.watch = setTimeout(dog, 1000); } }, { once: true }); } });
+      if (p && p.catch) p.catch(err => { if (err && err.name === "NotAllowedError") { clearTimeout(this.watch); this.mask(""); toast("点一下画面开始播放"); v.addEventListener("play", () => { if (!ok) this.watch = setTimeout(() => { if (!ok) fail("连接超时"); }, this.auto && !this.proxy ? 12000 : REMOTE ? 25000 : 15000); }, { once: true }); } });
     };
-    if (useHls) {
-      const hls = this.hls = new Hls({ maxBufferLength: 45, enableWorker: true, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 2, fLoader: prefLoader(this) });
+    const isM3u8 = /\.m3u8/i.test(ep.url);
+    const nativeHls = !!v.canPlayType("application/vnd.apple.mpegurl") && (IS_IOS || IS_SAFARI || !(window.Hls && Hls.isSupported()));
+    if (isM3u8 && !nativeHls && window.Hls && Hls.isSupported()) {
+      const hls = this.hls = new Hls({ maxBufferLength: 45, enableWorker: true, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
       let mediaErr = 0;
       hls.on(Hls.Events.ERROR, (e, d) => {
         if (!d.fatal) return;
@@ -731,15 +635,7 @@ class Player {
     const spd = fmtBps(this._bw);
     el.innerHTML = `<i class="${this._relay ? "rl" : "dr"}"></i>${this._relay ? "中转" : "直连"}${res ? `<em class="${h && h < 700 ? "low" : ""}" title="片源视频本身的分辨率">${res}</em>` : ""}${spd ? `<em class="spd">${spd}</em>` : ""}`;
   }
-  // 片源嫌连接多、已退回单路：1080 单路不到 0.9 MB/s 撑不住，缓冲剩不到 15 秒就主动换，不等卡住
-  crowdCheck(v) {
-    if (!this._crowd || !this.auto || this._failing) return;
-    const s = this.sources[this.si]; if (!s || (s.pres || s.res || 0) < 1000 || (this.spd.get(s.api) || 0) >= 0.9 * MB) return;
-    let ahead = 0; const b = v.buffered; for (let i = 0; i < b.length; i++) if (b.start(i) <= v.currentTime + .5 && b.end(i) > v.currentTime) ahead = b.end(i) - v.currentTime;
-    if (ahead >= 15) return;
-    this._crowd = false; this.failover("限制多路下载", v.currentTime);
-  }
-  cleanup() { clearInterval(this.infoT); clearTimeout(this.watch); clearTimeout(this.stall); if (this._pf) { this._pf.stop(); this._pf = null; } if (this.hls) { this.hls.destroy(); this.hls = null; } }
+  cleanup() { clearInterval(this.infoT); clearTimeout(this.watch); clearTimeout(this.stall); if (this.hls) { this.hls.destroy(); this.hls = null; } }
   save(v, force) {
     const now = Date.now(); if (!force && now - (this._sv || 0) < 4000) return; this._sv = now;
     const old = H.get(this.key) || {}; const seen = new Set(old.seen || []); seen.add(this.ei);
